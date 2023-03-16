@@ -1,3 +1,36 @@
+# YOLOv7 VisDrone
+
+## Installation
+### Clone this repository
+```$ https://github.com/godhj93/YOLOv7_Compression.git```
+
+### Prepare VisDrone dataset
+#### Download at [official](https://github.com/VisDrone/VisDrone-Dataset) or use [ONLY FOR UNIST](https://unistackr0-my.sharepoint.com/:u:/g/personal/godhj_unist_ac_kr/Eb6LW-BYI5BCtTRMRt4TOrUBiQJWSD8uVdYyHvuzbPXgWw?e=lscDph)
+
+### Run docker
+```
+$ docker run -it \
+     --gpus all \
+     --privileged \
+     --env="DISPLAY" \
+     --env="QT_X11_NO_MITSHM=1" \
+     --env=NVIDIA_VISIBLE_DEVICES=all \
+     --env=NVIDIA_DRIVER_CAPABILITIES=all \
+     --net=host \
+     --ipc=host \
+     --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
+     -v /dev:/dev \
+     -v ~/:/server/ \
+     -v PATH/TO/YOLOv7_Compression/:/root/YOLOv7 \
+     -v PATH/TO/VISDRONE_DATASET/:/root/datasets \
+     --name CONTAINER_NAME \
+     nvcr.io/nvidia/pytorch:21.08-py3
+    
+# In the container
+$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx
+$(docker) pip install seaborn thop
+```
+
 # Official YOLOv7
 
 Implementation of paper - [YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors](https://arxiv.org/abs/2207.02696)
