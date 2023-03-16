@@ -2,7 +2,9 @@
 
 ## Installation
 ### Clone this repository
-```$ https://github.com/godhj93/YOLOv7_Compression.git```
+```
+$ https://github.com/godhj93/YOLOv7_Compression.git
+```
 
 ### Prepare VisDrone dataset
 #### Download at [official](https://github.com/VisDrone/VisDrone-Dataset) or use [ONLY FOR UNIST](https://unistackr0-my.sharepoint.com/:u:/g/personal/godhj_unist_ac_kr/Eb6LW-BYI5BCtTRMRt4TOrUBiQJWSD8uVdYyHvuzbPXgWw?e=lscDph)
