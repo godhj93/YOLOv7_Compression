@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 class Quantization:
 
     def __init__(self, pretrained_weight, backend = 'x86'):
-        
+        from models.experimental import Q_model
+
         self.device = torch.device("cpu")
         self.pretrained_weight = pretrained_weight
-        self.model = attempt_load(weights=self.pretrained_weight, quantize=True)
+        self.model_fp32 = attempt_load(weights=self.pretrained_weight)
+        self.model = Q_model(self.model_fp32)
         self.backend = backend # 'x86' or 'qnnpack'
         logging.info(f"{GREEN}Quantization Backend: {self.backend}{RESET}")
 
@@ -56,6 +58,7 @@ class Quantization:
         torch.quantization.convert(self.model, inplace=True)
         self.model.load_state_dict(torch.load(weights))
         logging.info(f"{GREEN}Weights are loaded.{RESET}")
+
     def _post_static_quantization(self, dataloader):
 
         self.set_q_config()
@@ -168,3 +171,12 @@ if __name__ == '__main__':
     Q2 = Quantization(pretrained_weight=weights)
     Q2.load_state_dict('runs/train/yolov7/weights/best_psq.pt')
     
+    # print(Q.model)
+
+    # print(type(Q.model))
+
+    # #Q.model.eval()
+
+    # random_input = np.random.random((1,3,640,640)).astype(np.float32)
+
+    # Q.model(torch.Tensor(random_input))

@@ -82,29 +82,23 @@ class Ensemble(nn.ModuleList):
 
 
 
-class Q_model(nn.ModuleList):
+class Q_model(nn.Module):
     # Quantization class of models
-    def __init__(self):
+    def __init__(self, pretrained_model):
         super(Q_model, self).__init__()
 
         self.quant = torch.quantization.QuantStub()
         self.dequant = torch.quantization.DeQuantStub()
+        print(pretrained_model, type(pretrained_model))
+        for layer in pretrained_model[0]:
+            print(layer)
 
     def forward(self, x, augment=False):
 
         x = self.quant(x)
-
-        y = []
-        for module in self:
-            if isinstance(module, torch.quantization.QuantStub) or isinstance(module, torch.quantization.DeQuantStub):
-                pass
-            else:
-                y.append(module(x, augment)[0])
-        # y = torch.stack(y).max(0)[0]  # max ensemble
-        # y = torch.stack(y).mean(0)  # mean ensemble
-
+        y = self.model_fp32(x, augment)
         y = self.dequant(y)
-        y = torch.cat(y, 1)  # nms ensemble
+        
         return y, None  # inference, train output
 
 
@@ -271,14 +265,12 @@ class End2End(nn.Module):
 
 
 
-def attempt_load(weights, quantize = False, map_location=None):
+def attempt_load(weights,  map_location=None):
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
-    if quantize:
-        model = Q_model()
-    else:
-        model = Ensemble()
+    
+    model = Ensemble()
     for w in weights if isinstance(weights, list) else [weights]:
-        attempt_download(w)
+        #attempt_download(w)
         ckpt = torch.load(w, map_location=map_location)  # load
         model.append(ckpt['ema' if ckpt.get('ema') else 'model'].float().fuse().eval())  # FP32 model
     
