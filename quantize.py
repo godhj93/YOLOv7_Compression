@@ -94,6 +94,8 @@ if __name__ == '__main__':
         y_hat2 = model(input_x)
     
     print(y_hat1[0].shape, y_hat2[0].shape)
+
+    
     print("done")
 
     # Load Dataset
