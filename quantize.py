@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 class Quantization:
 
     def __init__(self, pretrained_weight, backend = 'x86'):
-
+        
         self.device = torch.device("cpu")
         self.pretrained_weight = pretrained_weight
         self.model = attempt_load(weights=self.pretrained_weight, quantize=True)
         self.backend = backend # 'x86' or 'qnnpack'
-        logging.info(f"{GREEN}Backend: {self.backend}{RESET}")
+        logging.info(f"{GREEN}Quantization Backend: {self.backend}{RESET}")
 
     def quantize(self, method, dataloader=None):
 
@@ -41,16 +41,26 @@ class Quantization:
         else:
             raise ValueError("Quantization method should be 'psq' or 'qat'")
 
-    def _post_static_quantization(self, dataloader):
-
-        self.model.to(self.device).eval()
+    def set_q_config(self):
 
         if self.backend == 'x86': # for x86_64 
             q_config = torch.quantization.get_default_qconfig("x86")
         elif self.backend == 'qnnpack': # for aarch 
             q_config = torch.quantization.get_default_qconfig("qnnpack")
-        
         self.model.qconfig = q_config
+
+    def load_state_dict(self, weights):
+
+        self.set_q_config()
+        torch.quantization.prepare(self.model, inplace=True)
+        torch.quantization.convert(self.model, inplace=True)
+        self.model.load_state_dict(torch.load(weights))
+        logging.info(f"{GREEN}Weights are loaded.{RESET}")
+    def _post_static_quantization(self, dataloader):
+
+        self.set_q_config()
+        self.model.to(self.device).eval()
+
         torch.quantization.prepare(self.model, inplace=True)
         logging.info(GREEN+"Prepared Post Static Quantization"+RESET)
 
@@ -154,20 +164,7 @@ if __name__ == '__main__':
 
     # Quantization
     Q.quantize('psq', dataloader= dataloader)
-
-    # results, maps, times = test.test(data_dict,
-    #                                              batch_size=batch_size * 2,
-    #                                              imgsz=imgsz_test,
-    #                                              model=None,
-    #                                              single_cls=opt.single_cls,
-    #                                              dataloader=testloader,
-    #                                              save_dir=save_dir,
-    #                                              verbose=True,
-    #                                              plots=True,
-    #                                              wandb_logger=False,
-    #                                              compute_loss=compute_loss,
-    #                                              is_coco=False,
-    #                                              v5_metric=opt.v5_metric,
-    #                                              quantize=True,
-    #                                              weights = Q.save_path )
-
+    
+    Q2 = Quantization(pretrained_weight=weights)
+    Q2.load_state_dict('runs/train/yolov7/weights/best_psq.pt')
+    
