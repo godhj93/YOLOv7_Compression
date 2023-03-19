@@ -23,7 +23,7 @@ $ docker run -it \
      --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
      -v /dev:/dev \
      -v ~/:/server/ \
-     -v PATH/TO/YOLOv7_Compression/:/root/YOLOv7 \
+     -v PATH/TO/YOLOv7_VisDrone/:/root/YOLOv7 \
      -v PATH/TO/VISDRONE_DATASET/:/root/datasets \
      --name CONTAINER_NAME \
      nvcr.io/nvidia/pytorch:21.08-py3
@@ -33,6 +33,14 @@ $(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx
 $(docker) pip install seaborn thop
 ```
 
+# Export ONNX
+```
+python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 384 672 --dynamic-batch --grid --max-wh 640
+```
+# Test ONNX and TensorRT
+```
+python test_trt.py --data data/VisDrone.yaml --img 640 --batch 32 --conf 0.001 --iou 0.65 --device 0 --weights runs/train/yolov7-tiny/weights/best.pt --name yolov7_640_val
+```
 # Official YOLOv7
 
 Implementation of paper - [YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors](https://arxiv.org/abs/2207.02696)
