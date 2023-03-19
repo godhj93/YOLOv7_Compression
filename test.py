@@ -63,9 +63,9 @@ def test(data,
             model = TracedModel(model, device, imgsz)
 
     # Half
-    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
-    if half:
-        model.half()
+    # half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
+    # if half:
+    #     model.half()
 
     # Configure
     model.eval()
@@ -101,20 +101,97 @@ def test(data,
     p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
+
+    #ONNX
+    if opt.engine == 'onnx':
+        import onnxruntime as ort
+        w = weights[0].replace("pt", "onnx") #"runs/train/yolov7-tiny/weights/best.onnx" 
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        session = ort.InferenceSession(w, providers=providers)
+        outname = [i.name for i in session.get_outputs()]
+        inname = [i.name for i in session.get_inputs()]
+    elif opt.engine == 'trt':
+        import tensorrt as trt
+        from collections import OrderedDict, namedtuple
+        w = weights[0].replace("pt", "trt")
+        Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
+        logger = trt.Logger(trt.Logger.INFO)
+        trt.init_libnvinfer_plugins(logger, namespace="")
+        with open(w, 'rb') as f, trt.Runtime(logger) as runtime:
+            model = runtime.deserialize_cuda_engine(f.read())
+        
+        bindings = OrderedDict()
+        for index in range(model.num_bindings):
+            name = model.get_binding_name(index)
+            dtype = trt.nptype(model.get_binding_dtype(index))
+            shape = tuple(model.get_binding_shape(index))
+            data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(device)
+            bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
+        binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
+        context = model.create_execution_context()
+        # warmup for 10 times
+        for _ in range(10):
+            tmp = torch.randn(1,3,640,640).to(device)
+            binding_addrs['images'] = int(tmp.data_ptr())
+            context.execute_v2(list(binding_addrs.values()))
+        
+    elif opt.engine == 'lite':
+        # Tensorflow Lite works on CPU
+        # To build a Tensorflow Lite Engine, Refer 'Convert_ONNX_to_Tensorflow.ipynb'
+        import tensorflow as tf
+        lite_path = weights[0].replace(".pt",".tflite")
+        interpreter = tf.lite.Interpreter(model_path=lite_path, num_threads=4)
+        print(f"Tensorflow Lite Input Details\n{interpreter.get_input_details()[0]}")
+        interpreter.allocate_tensors()
+        input_index = interpreter.get_input_details()[0]["index"]
+        output_index = interpreter.get_output_details()[0]["index"]
+
+
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
+        # img = img.half() if half else img.float()  # uint8 to fp16/32
+        img = img.float()
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
 
         with torch.no_grad():
             # Run model
-            t = time_synchronized()
-            out, train_out = model(img, augment=augment)  # inference and training outputs
-            t0 += time_synchronized() - t
+            if opt.engine == 'onnx':
+                inp = {inname[0]:img.cpu().numpy().astype(np.float32)}
+                t = time_synchronized()
+                # out, train_out = model(img, augment=augment)  # inference and training outputs
+                out = session.run(outname, inp)[0]
+                t0 += time_synchronized() - t
+                out = torch.Tensor(out).to(device)
+
+            elif opt.engine == 'trt':
+                binding_addrs['images'] = int(img.data_ptr())
+                t = time_synchronized()
+                context.execute_v2(list(binding_addrs.values()))
+                out = bindings['output'].data
+                t0 += time_synchronized() -t 
+
+            elif opt.engine == 'lite':
+                img = img.cpu().numpy().astype(np.float32)
+                t = time_synchronized()
+                interpreter.set_tensor(input_index, img)
+                interpreter.invoke()
+                out = interpreter.get_tensor(output_index)
+                t0 += time_synchronized() -t 
+                out = torch.Tensor(out).to(device)
+
+            elif opt.engine == 'torch':
+                t = time_synchronized()
+                out, train_out = model(img, augment=augment)  # inference and training outputs
+                t0 += time_synchronized() - t
+
+            else:
+                raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")
+                
 
             # Compute loss
+            train_out = None # Disable Compute loss
             if compute_loss:
                 loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
 
@@ -277,7 +354,10 @@ def test(data,
             print(f'pycocotools unable to run: {e}')
 
     # Return results
-    model.float()  # for training
+    if opt.engine in ['trt', 'onnx', 'lite']:
+        pass
+    else:
+        model.float()  # for training
     if not training:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
@@ -309,11 +389,14 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
+    parser.add_argument('--engine', type=str, default='', help='engine for inference: ["lite", "trt", "onnx", "torch"]')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
     print(opt)
     #check_requirements()
+    
+    assert opt.engine in ["trt", "lite", "onnx", "torch"]
 
     if opt.task in ('train', 'val', 'test'):  # run normally
         test(opt.data,
