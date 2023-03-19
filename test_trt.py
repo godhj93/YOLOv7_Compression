@@ -103,30 +103,66 @@ def test(data,
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
 
     #ONNX
-    import onnxruntime as ort
-    w = weights[0].replace("pt", "onnx") #"runs/train/yolov7-tiny/weights/best.onnx" 
-    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-    session = ort.InferenceSession(w, providers=providers)
-    outname = [i.name for i in session.get_outputs()]
-    inname = [i.name for i in session.get_inputs()]
-    
+    if opt.onnx:
+        import onnxruntime as ort
+        w = weights[0].replace("pt", "onnx") #"runs/train/yolov7-tiny/weights/best.onnx" 
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        session = ort.InferenceSession(w, providers=providers)
+        outname = [i.name for i in session.get_outputs()]
+        inname = [i.name for i in session.get_inputs()]
+    if opt.trt:
+        import tensorrt as trt
+        from collections import OrderedDict, namedtuple
+        w = weights[0].replace("pt", "trt")
+        Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
+        logger = trt.Logger(trt.Logger.INFO)
+        trt.init_libnvinfer_plugins(logger, namespace="")
+        with open(w, 'rb') as f, trt.Runtime(logger) as runtime:
+            model = runtime.deserialize_cuda_engine(f.read())
+        
+        bindings = OrderedDict()
+        for index in range(model.num_bindings):
+            name = model.get_binding_name(index)
+            dtype = trt.nptype(model.get_binding_dtype(index))
+            shape = tuple(model.get_binding_shape(index))
+            data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(device)
+            bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
+        binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
+        context = model.create_execution_context()
+        # warmup for 10 times
+        for _ in range(10):
+            tmp = torch.randn(1,3,640,640).to(device)
+            binding_addrs['images'] = int(tmp.data_ptr())
+            context.execute_v2(list(binding_addrs.values()))
+        
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
+        # img = img.half() if half else img.float()  # uint8 to fp16/32
+        img = img.float()
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
 
-        inp = {inname[0]:img.cpu().numpy().astype(np.float32)}
-        
-        # print(type(inp), inp)
         with torch.no_grad():
             # Run model
-            t = time_synchronized()
-            # out, train_out = model(img, augment=augment)  # inference and training outputs
-            out = session.run(outname, inp)[0]
-            t0 += time_synchronized() - t
-            out = torch.Tensor(out).to(device)
+            if opt.onnx:
+                inp = {inname[0]:img.cpu().numpy().astype(np.float32)}
+                t = time_synchronized()
+                # out, train_out = model(img, augment=augment)  # inference and training outputs
+                out = session.run(outname, inp)[0]
+                t0 += time_synchronized() - t
+                out = torch.Tensor(out).to(device)
+
+            if opt.trt:
+                binding_addrs['images'] = int(img.data_ptr())
+                t = time_synchronized()
+                context.execute_v2(list(binding_addrs.values()))
+                out = bindings['output'].data
+                t0 += time_synchronized() -t 
+
+                
+                
+                
 
             # Compute loss
             train_out = None # Disable Compute loss
@@ -292,7 +328,10 @@ def test(data,
             print(f'pycocotools unable to run: {e}')
 
     # Return results
-    model.float()  # for training
+    if opt.trt:
+        pass
+    else:
+        model.float()  # for training
     if not training:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")
@@ -324,11 +363,15 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
+    parser.add_argument('--onnx', type=bool, default=False, help='test with onnx model')
+    parser.add_argument('--trt', type=bool, default=False, help='test with trt model')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
     print(opt)
     #check_requirements()
+    
+    assert opt.onnx is True or opt.trt is True
 
     if opt.task in ('train', 'val', 'test'):  # run normally
         test(opt.data,
