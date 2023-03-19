@@ -29,17 +29,29 @@ $ docker run -it \
      nvcr.io/nvidia/pytorch:21.08-py3
     
 # In the container
-$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx
-$(docker) pip install seaborn thop
+$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip install seaborn thop
 ```
 
 ## Export ONNX
 ```
 python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 384 672 --dynamic-batch --grid --max-wh 640
 ```
-## Test ONNX and TensorRT
+## Export TensorRT
 ```
-python test_trt.py --data data/VisDrone.yaml --img 640 --batch 32 --conf 0.001 --iou 0.65 --device 0 --weights runs/train/yolov7-tiny/weights/best.pt --name yolov7_640_val
+git clone https://github.com/Linaom1214/TensorRT-For-YOLO-Series
+cd tensorrt-python 
+pip install --upgrade setuptools pip --user
+pip install nvidia-pyindex
+pip install --upgrade nvidia-tensorrt
+pip install pycuda
+python export.py -o ../YOLOv7/runs/train/yolov7-tiny/weights.best.onnx  -e ../YOLOv7/runs/train/yolov7-tiny/weights.best.trt -p fp16
+```
+## Export Tensorflow Lite
+- Refer Convert_ONNX_to_Tensorflow_Lite.ipynb
+## Test (Torch, Tensorflow Lite, ONNX or TensorRT)
+```
+python test.py --data data/VisDrone.yaml --img 640 --batch 1 --conf 0.001 --iou 0.65 --device 0 --weights runs/train/yolov7-tiny/weights/best.pt --name yolov7_640_val --engine ARG_ENGINES
+ARG_ENGINES: "torch", "lite", "onnx", "trt"
 ```
 # Official YOLOv7
 
