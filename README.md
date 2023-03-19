@@ -33,11 +33,11 @@ $(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx
 $(docker) pip install seaborn thop
 ```
 
-# Export ONNX
+## Export ONNX
 ```
 python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 384 672 --dynamic-batch --grid --max-wh 640
 ```
-# Test ONNX and TensorRT
+## Test ONNX and TensorRT
 ```
 python test_trt.py --data data/VisDrone.yaml --img 640 --batch 32 --conf 0.001 --iou 0.65 --device 0 --weights runs/train/yolov7-tiny/weights/best.pt --name yolov7_640_val
 ```
