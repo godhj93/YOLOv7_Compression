@@ -103,48 +103,49 @@ def test(data,
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
 
     #ONNX
-    if opt.engine == 'onnx':
-        import onnxruntime as ort
-        w = weights[0].replace("pt", "onnx") #"runs/train/yolov7-tiny/weights/best.onnx" 
-        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        session = ort.InferenceSession(w, providers=providers)
-        outname = [i.name for i in session.get_outputs()]
-        inname = [i.name for i in session.get_inputs()]
-    elif opt.engine == 'trt':
-        import tensorrt as trt
-        from collections import OrderedDict, namedtuple
-        w = weights[0].replace("pt", "trt")
-        Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
-        logger = trt.Logger(trt.Logger.INFO)
-        trt.init_libnvinfer_plugins(logger, namespace="")
-        with open(w, 'rb') as f, trt.Runtime(logger) as runtime:
-            model = runtime.deserialize_cuda_engine(f.read())
-        
-        bindings = OrderedDict()
-        for index in range(model.num_bindings):
-            name = model.get_binding_name(index)
-            dtype = trt.nptype(model.get_binding_dtype(index))
-            shape = tuple(model.get_binding_shape(index))
-            data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(device)
-            bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
-        binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
-        context = model.create_execution_context()
-        # warmup for 10 times
-        for _ in range(10):
-            tmp = torch.randn(1,3,640,640).to(device)
-            binding_addrs['images'] = int(tmp.data_ptr())
-            context.execute_v2(list(binding_addrs.values()))
-        
-    elif opt.engine == 'lite':
-        # Tensorflow Lite works on CPU
-        # To build a Tensorflow Lite Engine, Refer 'Convert_ONNX_to_Tensorflow.ipynb'
-        import tensorflow as tf
-        lite_path = weights[0].replace(".pt",".tflite")
-        interpreter = tf.lite.Interpreter(model_path=lite_path, num_threads=4)
-        print(f"Tensorflow Lite Input Details\n{interpreter.get_input_details()[0]}")
-        interpreter.allocate_tensors()
-        input_index = interpreter.get_input_details()[0]["index"]
-        output_index = interpreter.get_output_details()[0]["index"]
+    if not training:
+        if opt.engine == 'onnx':
+            import onnxruntime as ort
+            w = weights[0].replace("pt", "onnx") #"runs/train/yolov7-tiny/weights/best.onnx" 
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+            session = ort.InferenceSession(w, providers=providers)
+            outname = [i.name for i in session.get_outputs()]
+            inname = [i.name for i in session.get_inputs()]
+        elif opt.engine == 'trt':
+            import tensorrt as trt
+            from collections import OrderedDict, namedtuple
+            w = weights[0].replace("pt", "trt")
+            Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
+            logger = trt.Logger(trt.Logger.INFO)
+            trt.init_libnvinfer_plugins(logger, namespace="")
+            with open(w, 'rb') as f, trt.Runtime(logger) as runtime:
+                model = runtime.deserialize_cuda_engine(f.read())
+            
+            bindings = OrderedDict()
+            for index in range(model.num_bindings):
+                name = model.get_binding_name(index)
+                dtype = trt.nptype(model.get_binding_dtype(index))
+                shape = tuple(model.get_binding_shape(index))
+                data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(device)
+                bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
+            binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
+            context = model.create_execution_context()
+            # warmup for 10 times
+            for _ in range(10):
+                tmp = torch.randn(1,3,640,640).to(device)
+                binding_addrs['images'] = int(tmp.data_ptr())
+                context.execute_v2(list(binding_addrs.values()))
+            
+        elif opt.engine == 'lite':
+            # Tensorflow Lite works on CPU
+            # To build a Tensorflow Lite Engine, Refer 'Convert_ONNX_to_Tensorflow.ipynb'
+            import tensorflow as tf
+            lite_path = weights[0].replace(".pt",".tflite")
+            interpreter = tf.lite.Interpreter(model_path=lite_path, num_threads=4)
+            print(f"Tensorflow Lite Input Details\n{interpreter.get_input_details()[0]}")
+            interpreter.allocate_tensors()
+            input_index = interpreter.get_input_details()[0]["index"]
+            output_index = interpreter.get_output_details()[0]["index"]
 
 
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
@@ -157,38 +158,39 @@ def test(data,
 
         with torch.no_grad():
             # Run model
-            if opt.engine == 'onnx':
-                inp = {inname[0]:img.cpu().numpy().astype(np.float32)}
-                t = time_synchronized()
-                # out, train_out = model(img, augment=augment)  # inference and training outputs
-                out = session.run(outname, inp)[0]
-                t0 += time_synchronized() - t
-                out = torch.Tensor(out).to(device)
+            if not training:
+                if opt.engine == 'onnx':
+                    inp = {inname[0]:img.cpu().numpy().astype(np.float32)}
+                    t = time_synchronized()
+                    # out, train_out = model(img, augment=augment)  # inference and training outputs
+                    out = session.run(outname, inp)[0]
+                    t0 += time_synchronized() - t
+                    out = torch.Tensor(out).to(device)
 
-            elif opt.engine == 'trt':
-                binding_addrs['images'] = int(img.data_ptr())
-                t = time_synchronized()
-                context.execute_v2(list(binding_addrs.values()))
-                out = bindings['output'].data
-                t0 += time_synchronized() -t 
+                elif opt.engine == 'trt':
+                    binding_addrs['images'] = int(img.data_ptr())
+                    t = time_synchronized()
+                    context.execute_v2(list(binding_addrs.values()))
+                    out = bindings['output'].data
+                    t0 += time_synchronized() -t 
 
-            elif opt.engine == 'lite':
-                img = img.cpu().numpy().astype(np.float32)
-                t = time_synchronized()
-                interpreter.set_tensor(input_index, img)
-                interpreter.invoke()
-                out = interpreter.get_tensor(output_index)
-                t0 += time_synchronized() -t 
-                out = torch.Tensor(out).to(device)
+                elif opt.engine == 'lite':
+                    img = img.cpu().numpy().astype(np.float32)
+                    t = time_synchronized()
+                    interpreter.set_tensor(input_index, img)
+                    interpreter.invoke()
+                    out = interpreter.get_tensor(output_index)
+                    t0 += time_synchronized() -t 
+                    out = torch.Tensor(out).to(device)
 
-            elif opt.engine == 'torch':
+                else:
+                    raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")
+                
+            else:
                 t = time_synchronized()
                 out, train_out = model(img, augment=augment)  # inference and training outputs
                 t0 += time_synchronized() - t
 
-            else:
-                raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")
-                
 
             # Compute loss
             train_out = None # Disable Compute loss
@@ -354,8 +356,9 @@ def test(data,
             print(f'pycocotools unable to run: {e}')
 
     # Return results
-    if opt.engine in ['trt', 'onnx', 'lite']:
-        pass
+    if not training:
+        if opt.engine in ['trt', 'onnx', 'lite']:
+            pass
     else:
         model.float()  # for training
     if not training:
