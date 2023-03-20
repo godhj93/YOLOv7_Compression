@@ -182,6 +182,11 @@ def test(data,
                     out = interpreter.get_tensor(output_index)
                     t0 += time_synchronized() -t 
                     out = torch.Tensor(out).to(device)
+                
+                elif opt.engine == 'torch':
+                    t = time_synchronized()
+                    out, train_out = model(img, augment=augment)  # inference and training outputs
+                    t0 += time_synchronized() - t
 
                 else:
                     raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")
