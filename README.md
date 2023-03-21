@@ -44,7 +44,7 @@ pip install --upgrade setuptools pip --user
 pip install nvidia-pyindex
 pip install --upgrade nvidia-tensorrt
 pip install pycuda
-python export.py -o ../YOLOv7/runs/train/yolov7-tiny/weights.best.onnx  -e ../YOLOv7/runs/train/yolov7-tiny/weights.best.trt -p fp16
+python export.py -o ../YOLOv7/runs/train/yolov7-tiny/weights/best.onnx  -e ../YOLOv7/runs/train/yolov7-tiny/weights/best.trt -p fp16
 ```
 ## Export Tensorflow Lite
 - Refer Convert_ONNX_to_Tensorflow_Lite.ipynb
