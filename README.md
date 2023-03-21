@@ -34,7 +34,7 @@ $(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip i
 
 ## Export ONNX
 ```
-python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 384 672 --dynamic-batch --grid --max-wh 640
+python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 384 672  --grid --max-wh 640
 ```
 ## Export TensorRT
 ```
