@@ -29,7 +29,7 @@ $ docker run -it \
      nvcr.io/nvidia/pytorch:21.08-py3
     
 # In the container
-$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip install seaborn thop
+$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip install seaborn htop
 ```
 
 ## Export ONNX
