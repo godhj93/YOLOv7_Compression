@@ -29,7 +29,7 @@ $ docker run -it \
      nvcr.io/nvidia/pytorch:21.08-py3
     
 # In the container
-$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip install seaborn thop
+$(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip install seaborn htop
 ```
 
 ## Export ONNX
@@ -39,7 +39,7 @@ python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 38
 ## Export TensorRT
 ```
 git clone https://github.com/Linaom1214/TensorRT-For-YOLO-Series
-cd tensorrt-python 
+cd TensorRT-For-YOLO-Series/
 pip install --upgrade setuptools pip --user
 pip install nvidia-pyindex
 pip install --upgrade nvidia-tensorrt
