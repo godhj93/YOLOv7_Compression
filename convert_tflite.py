@@ -10,7 +10,12 @@ from onnx_tf.backend import prepare
 from utils.datasets import create_dataloader
 import argparse
 import yaml
-
+#Limit GPU memory usage for tensorflow
+import tensorflow as tf
+gpus = tf.config.experimental.list_physical_devices("GPU")
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu,True)
+    
 parser = argparse.ArgumentParser()
 parser.add_argument('--single-cls', action='store_true', help='treat as single-class dataset')
 parser.add_argument('--data', default='data/VisDrone.yaml', help='path yaml')
