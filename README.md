@@ -47,7 +47,9 @@ pip install pycuda
 python export.py -o ../YOLOv7/runs/train/yolov7-tiny/weights/best.onnx  -e ../YOLOv7/runs/train/yolov7-tiny/weights/best.trt -p fp16
 ```
 ## Export Tensorflow Lite
-- Refer Convert_ONNX_to_Tensorflow_Lite.ipynb
+```
+python convert_tflite.py --load ONNX_MODEL_PATH
+```
 ## Test (Torch, Tensorflow Lite, ONNX or TensorRT)
 ```
 python test.py --data data/VisDrone.yaml --img 640 --batch 1 --conf 0.001 --iou 0.65 --device 0 --weights runs/train/yolov7-tiny/weights/best.pt --name yolov7_640_val --engine ARG_ENGINES
