@@ -79,12 +79,13 @@ dataloader = create_dataloader(data['train'], imgsz, batch_size, gs, opt, pad=0.
 
 def representative_data_gen():
     for i,(img, _, _, _) in tqdm(enumerate(dataloader)):
-        img = img.to("cpu", non_blocking=True).numpy().astype(np.float32)
+        img = img.to("cpu", non_blocking=True)
+        img = img.float()
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if i == 0:
             img_shape = img.shape
         if img.shape != img_shape:
             continue
-        img /= 255.0
         yield [img]
         # if i == 1000:
         #     break
