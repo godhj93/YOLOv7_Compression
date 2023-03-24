@@ -47,7 +47,6 @@ def convert_to_tf(model, precision, quantize="dynamic"):
         precision = tf.float32
     elif precision == 'fp16':
         precision = tf.float16
-        
     elif precision == 'int8':
         precision = tf.int8
 
@@ -77,9 +76,14 @@ with open(data) as f:
 check_dataset(data)  # check
 dataloader = create_dataloader(data['train'], imgsz, batch_size, gs, opt, pad=0.5, rect=True,
                                        prefix=colorstr(f'{task}: '))[0]
+
 def representative_data_gen():
-    for i,(img, targets, paths, shapes) in tqdm(enumerate(dataloader)):
+    for i,(img, _, _, _) in tqdm(enumerate(dataloader)):
         img = img.to("cpu", non_blocking=True).numpy().astype(np.float32)
+        if i == 0:
+            img_shape = img.shape
+        if img.shape != img_shape:
+            continue
         img /= 255.0
         yield [img]
         # if i == 1000:
