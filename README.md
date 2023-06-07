@@ -7,7 +7,7 @@ $ https://github.com/godhj93/YOLOv7_Compression.git
 ```
 
 ### Prepare VisDrone dataset
-#### Download at [official](https://github.com/VisDrone/VisDrone-Dataset) or use [ONLY FOR UNIST](https://unistackr0-my.sharepoint.com/:u:/g/personal/godhj_unist_ac_kr/Eb6LW-BYI5BCtTRMRt4TOrUBiQJWSD8uVdYyHvuzbPXgWw?e=lscDph)
+#### Download at [official](https://github.com/VisDrone/VisDrone-Dataset)
 
 ### Run docker
 ```
@@ -31,7 +31,10 @@ $ docker run -it \
 # In the container
 $(docker) apt update && apt install -y zip htop screen libgl1-mesa-glx &&  pip install seaborn htop
 ```
-
+## Training
+```
+python train.py --workers 8 --device 0 --batch-size 32 --data data/VisDrone.yaml --img 640 640 --cfg cfg/training/visdrone_cfg/yolov7-tiny.yaml --weights '' --name yolov7-tiny --hyp data/hyp.scratch.tiny.yaml
+```
 ## Export ONNX
 ```
 python export.py --weights runs/train/yolov7-tiny/weights/best.pt  --img-size 384 672  --grid --max-wh 640
