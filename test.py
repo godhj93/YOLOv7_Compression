@@ -16,8 +16,29 @@ from utils.general import coco80_to_coco91_class, check_dataset, check_file, che
 from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized, TracedModel
+import torch_tensorrt
 
+class pseudo_inference:
+    
+    def __init__(self, w, device='cuda'):
+        self.model = attempt_load(w, map_location=device) .eval() # load FP32 model
+        print(self.model)
 
+    def run(self, x, bs=1, no=15, ny_list=[80,40,20], nx_list=[80,40,20]):
+        z = []
+        for i in range(self.model.model[-1].nl):
+
+            if self.model.model[-1].grid[i][2:4] != x[i].shape[2:4]:
+
+                self.model.model[-1].grid[i] = self.model.model[-1]._make_grid(nx_list[i],ny_list[i]).to(x[i].device)
+            y = x[i].sigmoid()
+
+            y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.model.model[-1].grid[i]) * self.model.model[-1].stride[i]  # xy
+            y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.model.model[-1].anchor_grid[i]  # wh
+
+            z.append(y.view(bs, -1, no))
+        return torch.cat(z,1), x
+    
 def test(data,
          weights=None,
          batch_size=32,
@@ -59,8 +80,8 @@ def test(data,
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
         
-        if trace:
-            model = TracedModel(model, device, imgsz)
+        # if trace:
+        #     model = TracedModel(model, device, imgsz)
 
     # Half
     # half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
@@ -68,7 +89,12 @@ def test(data,
     #     model.half()
 
     # Configure
-    model.eval()
+    # model.eval()
+    # model.train()
+    model.model[-1].training=True
+
+    
+
     if isinstance(data, str):
         is_coco = data.endswith('coco.yaml')
         with open(data) as f:
@@ -85,7 +111,8 @@ def test(data,
     # Dataloader
     if not training:
         if device.type != 'cpu':
-            model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+            # model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+            pass
         task = opt.task if opt.task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
         dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, pad=0.5, rect=True,
                                        prefix=colorstr(f'{task}: '))[0]
@@ -112,40 +139,53 @@ def test(data,
             outname = [i.name for i in session.get_outputs()]
             inname = [i.name for i in session.get_inputs()]
         elif opt.engine == 'trt':
-            import tensorrt as trt
-            from collections import OrderedDict, namedtuple
-            w = weights[0].replace("pt", "trt")
-            Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
-            logger = trt.Logger(trt.Logger.INFO)
-            trt.init_libnvinfer_plugins(logger, namespace="")
-            with open(w, 'rb') as f, trt.Runtime(logger) as runtime:
-                model = runtime.deserialize_cuda_engine(f.read())
             
-            bindings = OrderedDict()
-            for index in range(model.num_bindings):
-                name = model.get_binding_name(index)
-                dtype = trt.nptype(model.get_binding_dtype(index))
-                shape = tuple(model.get_binding_shape(index))
-                data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(device)
-                bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
-            binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
-            context = model.create_execution_context()
-            # warmup for 10 times
-            for _ in range(10):
-                tmp = torch.randn(1,3,640,640).to(device)
-                binding_addrs['images'] = int(tmp.data_ptr())
-                context.execute_v2(list(binding_addrs.values()))
-            
+            if opt.qat: # QAT uses torch_tensorrt: https://github.com/pytorch/TensorRT
+                custom_inference = pseudo_inference(weights) # For QAT inference
+                w = weights[0].replace(".pt", "_qat.trt")
+                print(w)
+                model = torch.jit.load(w)
+
+            else: # Otherwise (PSQ and DQ), use tensorrt: https://github.com/NVIDIA/TensorRT
+                import tensorrt as trt
+                from collections import OrderedDict, namedtuple
+                w = weights[0].replace("pt", "trt")
+
+                Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
+                logger = trt.Logger(trt.Logger.INFO)
+                trt.init_libnvinfer_plugins(logger, namespace="")
+                with open(w, 'rb') as f, trt.Runtime(logger) as runtime:
+                    model = runtime.deserialize_cuda_engine(f.read())
+                
+                bindings = OrderedDict()
+                for index in range(model.num_bindings):
+                    name = model.get_binding_name(index)
+                    dtype = trt.nptype(model.get_binding_dtype(index))
+                    shape = tuple(model.get_binding_shape(index))
+                    data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(device)
+                    bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
+                binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
+                context = model.create_execution_context()
+                # warmup for 10 times
+                for _ in range(10):
+                    tmp = torch.randn(1,3,640,640).to(device)
+                    binding_addrs['images'] = int(tmp.data_ptr())
+                    context.execute_v2(list(binding_addrs.values()))
+                
         elif opt.engine == 'lite':
             # Tensorflow Lite works on CPU
             # To build a Tensorflow Lite Engine, Refer 'Convert_ONNX_to_Tensorflow.ipynb'
             import tensorflow as tf
             lite_path = weights[0].replace(".pt",".tflite")
-            interpreter = tf.lite.Interpreter(model_path=lite_path, num_threads=4)
+            interpreter = tf.lite.Interpreter(model_path=lite_path, num_threads=10)
             print(f"Tensorflow Lite Input Details\n{interpreter.get_input_details()[0]}")
             interpreter.allocate_tensors()
             input_index = interpreter.get_input_details()[0]["index"]
             output_index = interpreter.get_output_details()[0]["index"]
+
+        elif opt.engine == 'torch':
+            print("TEST ENGINE TORCH")
+            custom_inference = pseudo_inference(weights) # For QAT inference
 
 
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
@@ -153,9 +193,9 @@ def test(data,
         # img = img.half() if half else img.float()  # uint8 to fp16/32
         img = img.float()
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        print(img.shape)
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
-
         with torch.no_grad():
             # Run model
             if not training:
@@ -168,11 +208,16 @@ def test(data,
                     out = torch.Tensor(out).to(device)
 
                 elif opt.engine == 'trt':
-                    binding_addrs['images'] = int(img.data_ptr())
-                    t = time_synchronized()
-                    context.execute_v2(list(binding_addrs.values()))
-                    out = bindings['output'].data
-                    t0 += time_synchronized() -t 
+                    
+                    if opt.qat:
+                        train_out = model(img)  # inference and training outputs
+                        out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
+                    else:
+                        binding_addrs['images'] = int(img.data_ptr())
+                        t = time_synchronized()
+                        context.execute_v2(list(binding_addrs.values()))
+                        out = bindings['output'].data
+                        t0 += time_synchronized() -t 
 
                 elif opt.engine == 'lite':
                     img = img.cpu().numpy().astype(np.float32)
@@ -185,8 +230,12 @@ def test(data,
                 
                 elif opt.engine == 'torch':
                     t = time_synchronized()
-                    out, train_out = model(img, augment=augment)  # inference and training outputs
-                    t0 += time_synchronized() - t
+                    print(img.shape)
+                    # out, train_out = model(img, augment=augment)  # inference and training outputs
+                    train_out = model(img, augment=augment)  # inference and training outputs
+                    out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
+                    
+                    t0 += time_synchronized() - t                    
 
                 else:
                     raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")
@@ -398,6 +447,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
     parser.add_argument('--engine', type=str, default='', help='engine for inference: ["lite", "trt", "onnx", "torch"]')
+    parser.add_argument('--qat', action='store_true', help='test a QAT model (using torch_tensorrt)')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
