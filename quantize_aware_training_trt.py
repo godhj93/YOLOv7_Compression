@@ -106,6 +106,17 @@ def train(hyp, opt, device, tb_writer=None):
     train_path = data_dict['train']
     test_path = data_dict['val']
 
+    print(model)
+    modified_state_dict={}
+    for key, val in model.state_dict().items():
+    # for key, val in model.state_dict().items():
+        # Remove 'module.' from the key names
+        if key.startswith('module'):
+            modified_state_dict[key[7:]] = val
+        else:
+            modified_state_dict[key] = val
+
+    model.load_state_dict(modified_state_dict)
     
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # parameter names to freeze (full or partial)
@@ -241,14 +252,14 @@ def train(hyp, opt, device, tb_writer=None):
     nl = model.model[-1].nl  # number of detection layers (used for scaling hyp['obj'])
     imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]  # verify imgsz are gs-multiples
 
-    # DP mode
-    if cuda and rank == -1 and torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+    # # DP mode
+    # if cuda and rank == -1 and torch.cuda.device_count() > 1:
+    #     model = torch.nn.DataParallel(model)
 
-    # SyncBatchNorm
-    if opt.sync_bn and cuda and rank != -1:
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
-        logger.info('Using SyncBatchNorm()')
+    # # SyncBatchNorm
+    # if opt.sync_bn and cuda and rank != -1:
+    #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
+    #     logger.info('Using SyncBatchNorm()')
 
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
@@ -281,11 +292,11 @@ def train(hyp, opt, device, tb_writer=None):
                 check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
             model.half().float()  # pre-reduce anchor precision
 
-    # DDP mode
-    if cuda and rank != -1:
-        model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
-                    # nn.MultiheadAttention incompatibility with DDP https://github.com/pytorch/pytorch/issues/26698
-                    find_unused_parameters=any(isinstance(layer, nn.MultiheadAttention) for layer in model.modules()))
+    # # DDP mode
+    # if cuda and rank != -1:
+    #     model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
+    #                 # nn.MultiheadAttention incompatibility with DDP https://github.com/pytorch/pytorch/issues/26698
+    #                 find_unused_parameters=any(isinstance(layer, nn.MultiheadAttention) for layer in model.modules()))
 
     # Model parameters
     hyp['box'] *= 3. / nl  # scale to layers
@@ -300,16 +311,16 @@ def train(hyp, opt, device, tb_writer=None):
 
     # Quantization Aware Training Configuration for TensorRT
 
-    model = model.cuda()
-    modified_state_dict = {}
-    for key, val in model.state_dict().items():
+    # model = model.model.cuda()
+    # modified_state_dict = {}
+    # for key, val in model.state_dict().items():
         
-        if key.startswith('module'):
-            modified_state_dict[key[7:]] = val
-        else:
-           modified_state_dict[key] = val
+    #     if key.startswith('module'):
+    #         modified_state_dict[key[7:]] = val
+    #     else:
+    #        modified_state_dict[key] = val
     
-    model.load_state_dict(modified_state_dict)
+    # model.load_state_dict(modified_state_dict)
 
     #Calibrate the model using max calibration technique.
     with torch.no_grad():
