@@ -18,7 +18,7 @@ def compute_amax(model, **kwargs):
         
             print(F"{name:40}: {module}")
         else:
-            print("else run",name)
+            print("Skip quantization:",name)
     model.cuda()
 
 def collect_stats(model, data_loader, num_batches):
@@ -35,7 +35,8 @@ def collect_stats(model, data_loader, num_batches):
     # Feed data to the network for collecting stats
     model = model.cuda()
     for i, (image, _, _, _) in tqdm(enumerate(data_loader), total=num_batches):
-        image = image.to('cuda', non_blocking=True).float()# / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
+        image = image.to('cuda', non_blocking=True).float()/ 255.0  # uint8 to float32, 0-255 to 0.0-1.0
+        print("CAUTION: This normalization can be severe problem for some models. Please check the normalization method.")
         model(image.cuda())
         if i >= num_batches:
             break

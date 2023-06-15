@@ -320,7 +320,7 @@ def train(hyp, opt, device, tb_writer=None):
             num_calib_batch=32,
             calibrator="max",
             hist_percentile=[99.9, 99.99, 99.999, 99.9999],
-            out_dir="./runs/qat")
+            out_dir=wdir)
 
     # Start training
     t0 = time.time()

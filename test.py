@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 from threading import Thread
-
+import torch_tensorrt
 import numpy as np
 import torch
 import yaml
@@ -22,9 +22,9 @@ class pseudo_inference:
     
     def __init__(self, w, device='cuda'):
         self.model = attempt_load(w, map_location=device) .eval() # load FP32 model
-        print(self.model)
+        # print(self.model)
 
-    def run(self, x, bs=1, no=15, ny_list=[80,40,20], nx_list=[80,40,20]):
+    def run(self, x, bs=1, no=15, ny_list=None, nx_list=None):
         z = []
         for i in range(self.model.model[-1].nl):
 
@@ -232,9 +232,9 @@ def test(data,
                     if opt.qat:
                         t = time_synchronized()
                         train_out = model(img)  # inference and training outputs
+                        B,C,H,W = img.shape
+                        out, train_out = custom_inference.run(train_out, bs=B, no=15, ny_list=[H//8,H//16,H//32], nx_list=[W//8,W//16,W//32])
                         t0 += time_synchronized() -t 
-                        out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
-                        
                     else:
                         binding_addrs['images'] = int(img.data_ptr())
                         t = time_synchronized()
