@@ -16,7 +16,7 @@ from utils.general import coco80_to_coco91_class, check_dataset, check_file, che
 from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized, TracedModel
-import torch_tensorrt
+
 
 class pseudo_inference:
     
@@ -89,9 +89,9 @@ def test(data,
     #     model.half()
 
     # Configure
-    # model.eval()
+    model.eval()
     # model.train()
-    model.model[-1].training=True
+    # model.model[-1].training=True
 
     
 
@@ -187,13 +187,33 @@ def test(data,
             print("TEST ENGINE TORCH")
             custom_inference = pseudo_inference(weights) # For QAT inference
 
+        elif opt.engine == 'fpga':
+            custom_inference = pseudo_inference(weights) # For QAT inference
+            # Load Pre-calculated output
+            n_output_fpga = 3
+            n_npz_fpga = 40
+
+            output_fpga = [[],[],[]]
+            n_processed_fpga = 0
+            for npz in range(n_npz_fpga):
+                output_fpga.append([])
+                for idx_out in range(n_output_fpga):
+                    n_fpga = f'./fpga_out/fpga_out{npz}_out{idx_out}.npz'
+                    tensors_raw_fpga = np.load(n_fpga)['out_q_np']
+                    for tensor_raw in tensors_raw_fpga: # (n, 1, w, h, 45)
+                        n_processed_fpga += 1
+                        # tensor raw: 1, h, w, 45
+                        _, hh, ww, ele = tensor_raw.shape
+                        tensor = torch.from_numpy(tensor_raw).view((3, hh, ww, 15))
+                        output_fpga[idx_out].append(tensor)
+            n_processed_fpga = int(n_processed_fpga / n_output_fpga)
 
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
         # img = img.half() if half else img.float()  # uint8 to fp16/32
         img = img.float()
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        print(img.shape)
+        # print(img.shape)
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
         with torch.no_grad():
@@ -210,8 +230,11 @@ def test(data,
                 elif opt.engine == 'trt':
                     
                     if opt.qat:
+                        t = time_synchronized()
                         train_out = model(img)  # inference and training outputs
+                        t0 += time_synchronized() -t 
                         out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
+                        
                     else:
                         binding_addrs['images'] = int(img.data_ptr())
                         t = time_synchronized()
@@ -230,12 +253,12 @@ def test(data,
                 
                 elif opt.engine == 'torch':
                     t = time_synchronized()
-                    print(img.shape)
-                    # out, train_out = model(img, augment=augment)  # inference and training outputs
-                    train_out = model(img, augment=augment)  # inference and training outputs
-                    out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
-                    
+                    out, train_out = model(img, augment=augment)  # inference and training outputs
+                    # train_out = model(img, augment=augment)  # inference and training outputs
                     t0 += time_synchronized() - t                    
+                    # out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
+                    
+                    
 
                 else:
                     raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")

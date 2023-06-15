@@ -101,10 +101,6 @@ class Q_model(nn.Module):
         
         return y, None  # inference, train output
 
-
-
-
-
 class ORT_NMS(torch.autograd.Function):
     '''ONNX-Runtime NMS operation'''
     @staticmethod
