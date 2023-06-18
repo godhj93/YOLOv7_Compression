@@ -188,27 +188,15 @@ def test(data,
             custom_inference = pseudo_inference(weights) # For QAT inference
 
         elif opt.engine == 'fpga':
-            custom_inference = pseudo_inference(weights) # For QAT inference
-            # Load Pre-calculated output
-            n_output_fpga = 3
-            n_npz_fpga = 40
-
-            output_fpga = [[],[],[]]
-            n_processed_fpga = 0
-            for npz in range(n_npz_fpga):
-                output_fpga.append([])
-                for idx_out in range(n_output_fpga):
-                    n_fpga = f'./fpga_out/fpga_out{npz}_out{idx_out}.npz'
-                    tensors_raw_fpga = np.load(n_fpga)['out_q_np']
-                    for tensor_raw in tensors_raw_fpga: # (n, 1, w, h, 45)
-                        n_processed_fpga += 1
-                        # tensor raw: 1, h, w, 45
-                        _, hh, ww, ele = tensor_raw.shape
-                        tensor = torch.from_numpy(tensor_raw).view((3, hh, ww, 15))
-                        output_fpga[idx_out].append(tensor)
-            n_processed_fpga = int(n_processed_fpga / n_output_fpga)
-
+            custom_inference = pseudo_inference(weights) # For FPGA inference
+            fpga_dir = './fpga_out'
+            def totensor(npz_path):
+                ary = np.load(p)
+                out0, out1, out2 = ary['out0'], ary['out1'], ary['out2']
+                return [torch.Tensor(out0).cuda(), torch.Tensor(out1).cuda(), torch.Tensor(out2).cuda()]
+            
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+        
         img = img.to(device, non_blocking=True)
         # img = img.half() if half else img.float()  # uint8 to fp16/32
         img = img.float()
@@ -258,7 +246,14 @@ def test(data,
                     t0 += time_synchronized() - t                    
                     # out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
                     
-                    
+                elif opt.engine == 'fpga':
+                    B,C,H,W = img.shape
+                    p = paths[0].split('/')[-1]
+                    # print(p.replace('jpg','npz'))
+                    p = os.path.join(fpga_dir ,p.replace('jpg','npz'))
+                    train_out = totensor(p)
+                    out, train_out = custom_inference.run(train_out, bs=B, no=15, ny_list=[H//8,H//16,H//32], nx_list=[W//8,W//16,W//32])
+
 
                 else:
                     raise NameError(f"engine is not in list ['trt', 'lite', 'torch', 'onnx']")
@@ -477,7 +472,7 @@ if __name__ == '__main__':
     print(opt)
     #check_requirements()
     
-    assert opt.engine in ["trt", "lite", "onnx", "torch"]
+    assert opt.engine in ["trt", "lite", "onnx", "torch", "fpga"]
 
     if opt.task in ('train', 'val', 'test'):  # run normally
         test(opt.data,
