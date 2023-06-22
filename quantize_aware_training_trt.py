@@ -536,7 +536,7 @@ def train(hyp, opt, device, tb_writer=None):
 
     import torch_tensorrt
     model = torch.jit.load(weights.replace('.pt','_qat.jit')).eval().cuda()
-    complie_spec = {"inputs": [torch_tensorrt.Input([1, 3, 384, 640])],
+    complie_spec = {"inputs": [torch_tensorrt.Input([1, 3, 384, 672])],
                     "enabled_precisions": torch_tensorrt.dtype.int8,
                     "truncate_long_and_double": True,
                     "max_batch_size": 32}
