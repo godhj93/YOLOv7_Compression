@@ -535,41 +535,40 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-
+        
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
             # Load mosaic
-            if random.random() <= 1.0: #0.8
-                img, labels = load_mosaic(self, index)
-            else:
-                img, labels = load_mosaic9(self, index)
+            # if random.random() <= 1.0: #0.8
+            img, labels = load_mosaic(self, index)
+            # else:
+            #     img, labels = load_mosaic9(self, index)
             shapes = None
 
             # MixUp https://arxiv.org/pdf/1710.09412.pdf
             if random.random() < hyp['mixup']:
-                if random.random() < 0.8:
-                    img2, labels2 = load_mosaic(self, random.randint(0, len(self.labels) - 1))
-                else:
-                    img2, labels2 = load_mosaic9(self, random.randint(0, len(self.labels) - 1))
+                
+                img2, labels2 = load_mosaic(self, random.randint(0, len(self.labels) - 1))
+                
                 r = np.random.beta(8.0, 8.0)  # mixup ratio, alpha=beta=8.0
                 img = (img * r + img2 * (1 - r)).astype(np.uint8)
                 labels = np.concatenate((labels, labels2), 0)
-            print(f"mosaic input: {img.shape}")
+            
         else:
             # Load image
             (img, (h0, w0), (h, w)), (img_ir, (h0, w0), (h, w)) = load_image(self, index)
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img_rgb, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
             img_ir, ratio, pad = letterbox(img_ir, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
-
+            img = np.concatenate((img_rgb, img_ir), axis=2)
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
-                print(f"not mosaic input: {img.shape}")
+                
         if self.augment:
             # Augment imagespace
             if not mosaic:
@@ -579,7 +578,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  scale=hyp['scale'],
                                                  shear=hyp['shear'],
                                                  perspective=hyp['perspective'])
-                print(f"perspective input: {img.shape}")
+                
             
             #img, labels = self.albumentations(img, labels)
 
@@ -601,7 +600,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     if len(sample_labels) == 0:
                         break
                 labels = pastein(img, labels, sample_labels, sample_images, sample_masks)
-        print(f"final input: {img.shape}")
+        
         nL = len(labels)  # number of labels
         if nL:
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])  # convert xyxy to xywh
@@ -635,7 +634,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         img_ir = img_ir[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img_ir = np.ascontiguousarray(img_ir)
-        print(f"final output: {img_rgb.shape}, {img_ir.shape}")
         concat_img = torch.concat([torch.from_numpy(img_rgb), torch.from_numpy(img_ir)])
         return concat_img, labels_out, self.img_files[index], shapes
 
@@ -695,7 +693,7 @@ def load_image(self, index):
 
 
 def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
-    print(f"augment hsv input shape: {img.shape}")
+    
     img, img_ir = img[:,:,:3], img[:,:,3:]
 
     r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
@@ -708,7 +706,6 @@ def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
     lut_val = np.clip(x * r[2], 0, 255).astype(dtype)
 
     img_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val))).astype(dtype)
-    print(type(img_hsv), type(img), img_hsv.dtype, img.dtype)
     img = cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR)  # no return needed
     return np.concatenate((img, img_ir), axis=2)
 
@@ -786,7 +783,7 @@ def load_mosaic(self, index):
                                        shear=self.hyp['shear'],
                                        perspective=self.hyp['perspective'],
                                        border=self.mosaic_border)  # border to remove
-    print("RUN MOSAIC")
+    
     return img4, labels4
 
 
