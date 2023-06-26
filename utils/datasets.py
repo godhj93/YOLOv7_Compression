@@ -770,8 +770,7 @@ def load_mosaic(self, index):
     img4_concat = np.concatenate((img4, img4_ir), axis=2)
     
     img4, labels4, segments4 = copy_paste(img4_concat, labels4, segments4, probability=self.hyp['copy_paste'])
-    print(f"img4 concat: {img4.shape}")
-    raise ValueError('stop')
+    
     img4, labels4 = random_perspective(img4, labels4, segments4,
                                        degrees=self.hyp['degrees'],
                                        translate=self.hyp['translate'],
@@ -1053,6 +1052,7 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
                        border=(0, 0)):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
+    img, img_ir = img[:,:,:3], img[:,:,3:]
 
     height = img.shape[0] + border[0] * 2  # shape(h,w,c)
     width = img.shape[1] + border[1] * 2
@@ -1090,8 +1090,10 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
         if perspective:
             img = cv2.warpPerspective(img, M, dsize=(width, height), borderValue=(114, 114, 114))
+            img_ir = cv2.warpPerspective(img_ir, M, dsize=(width, height), borderValue=(114, 114, 114))
         else:  # affine
             img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
+            img_ir = cv2.warpAffine(img_ir, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
 
     # Visualize
     # import matplotlib.pyplot as plt
@@ -1135,7 +1137,9 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
         targets = targets[i]
         targets[:, 1:5] = new[i]
 
-    return img, targets
+    concat_img = np.concatenate((img, img_ir), axis=2)
+
+    return concat_img, targets
 
 
 def box_candidates(box1, box2, wh_thr=2, ar_thr=20, area_thr=0.1, eps=1e-16):  # box1(4,n), box2(4,n)
