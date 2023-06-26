@@ -381,6 +381,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     raise Exception(f'{prefix}{p} does not exist')
             self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in img_formats])
+            
             # self.img_files = sorted([x for x in f if x.suffix[1:].lower() in img_formats])  # pathlib
             assert self.img_files, f'{prefix}No images found'
         except Exception as e:
@@ -557,11 +558,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         else:
             # Load image
-            img, (h0, w0), (h, w) = load_image(self, index)
+            (img, (h0, w0), (h, w)), (img_ir, (h0, w0), (h, w)) = load_image(self, index)
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img_ir, ratio, pad = letterbox(img_ir, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             labels = self.labels[index].copy()
@@ -627,7 +629,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
-        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
+        img_ir = img_ir[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        img_ir = np.ascontiguousarray(img_ir)
+
+        concat_img = torch.concat([torch.from_numpy(img), torch.from_numpy(img_ir)])
+        return concat_img, labels_out, self.img_files[index], shapes
 
     @staticmethod
     def collate_fn(batch):
@@ -669,16 +675,19 @@ def load_image(self, index):
     img = self.imgs[index]
     if img is None:  # not cached
         path = self.img_files[index]
+        path_ir = self.img_files[index].replace('images', 'images_IR')
         img = cv2.imread(path)  # BGR
+        img_ir = cv2.imread(path_ir)  # BGR
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # resize image to img_size
         if r != 1:  # always resize down, only resize up if training with augmentation
             interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
             img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
-        return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
+            img_ir = cv2.resize(img_ir, (int(w0 * r), int(h0 * r)), interpolation=interp)
+        return [(img, (h0, w0), img.shape[:2]), (img_ir, (h0, w0), img_ir.shape[:2])]  # img, hw_original, hw_resized
     else:
-        return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
+        return self.imgs[index], self.img_hw0[index], self.img_hw[index], self.imgs[index].replace('images', 'images_IR'), self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
 
 
 def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
@@ -715,11 +724,12 @@ def load_mosaic(self, index):
     indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
     for i, index in enumerate(indices):
         # Load image
-        img, _, (h, w) = load_image(self, index)
+        (img, (h0, w0), (h, w)), (img_ir, (h0, w0), (h, w)) = load_image(self, index)
 
         # place img in img4
         if i == 0:  # top left
             img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+            img4_ir = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
             x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
             x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
         elif i == 1:  # top right
@@ -733,6 +743,8 @@ def load_mosaic(self, index):
             x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
 
         img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+        img4_ir[y1a:y2a, x1a:x2a] = img_ir[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+
         padw = x1a - x1b
         padh = y1a - y1b
 
@@ -753,7 +765,13 @@ def load_mosaic(self, index):
     # Augment
     #img4, labels4, segments4 = remove_background(img4, labels4, segments4)
     #sample_segments(img4, labels4, segments4, probability=self.hyp['copy_paste'])
-    img4, labels4, segments4 = copy_paste(img4, labels4, segments4, probability=self.hyp['copy_paste'])
+    
+    # Concatenation for EOIR input, 
+    img4_concat = np.concatenate((img4, img4_ir), axis=2)
+    
+    img4, labels4, segments4 = copy_paste(img4_concat, labels4, segments4, probability=self.hyp['copy_paste'])
+    print(f"img4 concat: {img4.shape}")
+    raise ValueError('stop')
     img4, labels4 = random_perspective(img4, labels4, segments4,
                                        degrees=self.hyp['degrees'],
                                        translate=self.hyp['translate'],
@@ -893,11 +911,17 @@ def load_samples(self, index):
 
 
 def copy_paste(img, labels, segments, probability=0.5):
+    
+    # Separate RGB and IR Images
+    img, img_ir = img[:,:,:3], img[:,:,3:]
+    
     # Implement Copy-Paste augmentation https://arxiv.org/abs/2012.07177, labels as nx5 np.array(cls, xyxy)
     n = len(segments)
     if probability and n:
         h, w, c = img.shape  # height, width, channels
         im_new = np.zeros(img.shape, np.uint8)
+        im_ir_new = np.zeros(img.shape, np.uint8)
+
         for j in random.sample(range(n), k=round(probability * n)):
             l, s = labels[j], segments[j]
             box = w - l[3], l[2], w - l[1], l[4]
@@ -906,6 +930,7 @@ def copy_paste(img, labels, segments, probability=0.5):
                 labels = np.concatenate((labels, [[l[0], *box]]), 0)
                 segments.append(np.concatenate((w - s[:, 0:1], s[:, 1:2]), 1))
                 cv2.drawContours(im_new, [segments[j].astype(np.int32)], -1, (255, 255, 255), cv2.FILLED)
+                cv2.drawContours(im_ir_new, [segments[j].astype(np.int32)], -1, (255, 255, 255), cv2.FILLED)
 
         result = cv2.bitwise_and(src1=img, src2=im_new)
         result = cv2.flip(result, 1)  # augment segments (flip left-right)
@@ -913,7 +938,16 @@ def copy_paste(img, labels, segments, probability=0.5):
         # i[:, :] = result.max(2).reshape(h, w, 1)  # act over ch
         img[i] = result[i]  # cv2.imwrite('debug.jpg', img)  # debug
 
-    return img, labels, segments
+        result = cv2.bitwise_and(src1=img_ir, src2=im_ir_new)
+        result = cv2.flip(result, 1)  # augment segments (flip left-right)
+        i = result > 0  # pixels to replace
+        # i[:, :] = result.max(2).reshape(h, w, 1)  # act over ch
+        img_ir[i] = result[i]  # cv2.imwrite('debug.jpg', img)  # debug
+
+    # Concatenate RGB and IR Images for network input
+    concat_img = np.concatenate((img, img_ir), axis=2)
+    
+    return concat_img, labels, segments
 
 
 def remove_background(img, labels, segments):
