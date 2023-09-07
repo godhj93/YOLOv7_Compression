@@ -573,10 +573,10 @@ class ComputeLoss_HLM(ComputeLoss):
         assert isinstance(y_t, tuple) and isinstance(y_s, tuple), "Expected outputs to be tuples"
         # assert len(y_t) == len(y_s), "Mismatch in tuple lengths"
         loss = 0
-        # Compute L2 loss for each header's output
-        loss += self.L2(y_s[0], y_t[1][0])
-        loss += self.L2(y_s[1], y_t[1][1])
-        loss += self.L2(y_s[2], y_t[1][2])
+        # Compute L2 loss for each header's output except bbox coordinates
+        loss += self.L2(y_s[0][:,:,:,:,4:], y_t[1][0][:,:,:,:,4:])
+        loss += self.L2(y_s[1][:,:,:,:,4:], y_t[1][1][:,:,:,:,4:])
+        loss += self.L2(y_s[2][:,:,:,:,4:], y_t[1][2][:,:,:,:,4:])
         
         # If you want the average loss across scales, you can divide by the number of scales
         # loss = loss / len(y_t)
