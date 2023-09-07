@@ -2,6 +2,7 @@ import argparse
 import logging
 import sys
 from copy import deepcopy
+from typing import Any
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
@@ -517,7 +518,6 @@ class IBin(nn.Module):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-
 class Model(nn.Module):
     def __init__(self, cfg='yolor-csp-c.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
         super(Model, self).__init__()
@@ -834,6 +834,74 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
+
+'''
+Knowledge Distillation Model for hint learning
+Author: H.J. Shin
+Date: 23.09.07
+'''
+from models.yolo import Model
+from models.common import MP
+class Model_KD(Model):
+    
+    def __init__(self, cfg, ch, nc, anchors):
+        super().__init__(cfg, ch, nc, anchors)
+
+    def forward(self, x, augment=False, profile=False):
+        if augment:
+            img_size = x.shape[-2:]  # height, width
+            s = [1, 0.83, 0.67]  # scales
+            f = [None, 3, None]  # flips (2-ud, 3-lr)
+            y = []  # outputs
+            for si, fi in zip(s, f):
+                xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
+                yi = self.forward_kd(xi)[0]  # forward
+                # cv2.imwrite(f'img_{si}.jpg', 255 * xi[0].cpu().numpy().transpose((1, 2, 0))[:, :, ::-1])  # save
+                yi[..., :4] /= si  # de-scale
+                if fi == 2:
+                    yi[..., 1] = img_size[0] - yi[..., 1]  # de-flip ud
+                elif fi == 3:
+                    yi[..., 0] = img_size[1] - yi[..., 0]  # de-flip lr
+                y.append(yi)
+            return torch.cat(y, 1), None  # augmented inference, train
+        else:
+            return self.forward_kd(x)  # single-scale inference, train
+        
+    def forward_kd(self, x):
+        y, dt = [], []  # outputs
+        
+        self.hint_features = []
+        last_mp_in_backbone_idx = 0
+        for idx, m in enumerate(self.model):
+            
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+
+            if not hasattr(self, 'traced'):
+                self.traced=False
+
+            if self.traced:
+                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint):
+                    break
+           
+            x = m(x)  # run
+            
+            if isinstance(m, MP):
+                last_mp_in_backbone_idx += 1
+                if last_mp_in_backbone_idx <= 3:
+                    # print(f"layer {idx} is a MaxPooling layer in backbone")
+                    self.hint_features.append(x)
+            y.append(x if m.i in self.save else None)  # save output
+
+        if len(x) == 3:
+            # print(f"len 3")
+            return (x[0], x[1], x[2]) 
+
+        elif len(x) == 2:
+            # print(f"len 2")
+            return x[0], x[1]
+        #return x
+        
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

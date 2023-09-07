@@ -287,4 +287,22 @@ def attempt_load(weights,  map_location=None):
             setattr(model, k, getattr(model[-1], k))
         return model  # return ensemble
 
-
+class HintRegressor(nn.Module):
+    '''
+    Author: H.J. Shin
+    Date: 23.09.07
+    Description: Hint regressor for knowledge distillation.
+    '''
+    def __init__(self, in_channels):
+        super(HintRegressor, self).__init__()
+        self.pconv1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels//4, kernel_size=1, stride=1, padding=0)
+        
+    def forward(self, x):
+        '''
+        x is a feature map from a teacher network whose channel size is 4 times larger than a student.
+        x is from a convolutional layer which is previous in MaxPool2d layer.
+        Teacher: YOLOv7
+        Student: YOLOv7-tiny
+        '''
+        return self.pconv1(x)
+        

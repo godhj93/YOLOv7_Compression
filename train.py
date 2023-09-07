@@ -79,9 +79,23 @@ def train(hyp, opt, device, tb_writer=None):
     names = ['item'] if opt.single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
     assert len(names) == nc, '%g names found for nc=%g dataset in %s' % (len(names), nc, opt.data)  # check
 
-    # Teacher
-    teacher = attempt_load('runs/train/yolov7/weights/best.pt', map_location=device)  # load teacher
+    # Teacher for Knowledge Distillation
+    from models.yolo import Model_KD
+    teacher_weight = 'runs/train/yolov7/weights/best.pt'
+    teacher_cfg = 'cfg/training/visdrone_cfg/yolov7.yaml'
+    ckpt = torch.load(teacher_weight, map_location=device)  # load checkpoint
+    teacher = Model_KD(teacher_cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+    exclude = ['anchor'] if (teacher_cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
+    state_dict = ckpt['model'].float().state_dict()  # to FP32
+    state_dict = intersect_dicts(state_dict, teacher.state_dict(), exclude=exclude)  # intersect
+    teacher.load_state_dict(state_dict, strict=False)  # load
+    # teacher = attempt_load(teacher_weight, map_location=device)  # load teacher
     teacher.cuda().eval()
+    
+    from models.yolo import HintRegressor
+    regressor_ES = HintRegressor(in_channels=256).cuda()
+    regressor_MS = HintRegressor(in_channels=512).cuda()
+    regressor_LS = HintRegressor(in_channels=1024).cuda()
     
     # Model
     pretrained = weights.endswith('.pt')
@@ -89,14 +103,17 @@ def train(hyp, opt, device, tb_writer=None):
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model = Model_KD(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (opt.cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
         state_dict = ckpt['model'].float().state_dict()  # to FP32
         state_dict = intersect_dicts(state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
         logger.info('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))  # report
     else:
-        model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model = Model_KD(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model_for_ema = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model_for_ema.load_state_dict(model.state_dict())
+        
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -201,7 +218,8 @@ def train(hyp, opt, device, tb_writer=None):
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # EMA
-    ema = ModelEMA(model) if rank in [-1, 0] else None
+    # ema = ModelEMA(model) if rank in [-1, 0] else None # Disabled for knowledge distillation
+    ema =  None
 
     # Resume
     start_epoch, best_fitness = 0, 0.0
@@ -309,6 +327,7 @@ def train(hyp, opt, device, tb_writer=None):
     
     # Teacher: YOLOv7, Student: model -> YOLOv7-tiny
     compute_hlm_loss = ComputeLoss_HLM(teacher, model)
+    compute_hint_loss = nn.MSELoss()
     
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
@@ -379,11 +398,16 @@ def train(hyp, opt, device, tb_writer=None):
                 # KD Loss    
                 with torch.no_grad():
                     y_t = teacher(imgs)
-                
-                loss_yolo = loss
+
                 loss_kd = compute_hlm_loss(y_t, pred)
-                loss += loss_kd
                 
+                loss_hint_ES = compute_hint_loss(regressor_ES(teacher.hint_features[0]), model.hint_features[0])
+                loss_hint_MS = compute_hint_loss(regressor_MS(teacher.hint_features[1]), model.hint_features[1])
+                loss_hint_LS = compute_hint_loss(regressor_LS(teacher.hint_features[2]), model.hint_features[2])
+                # print('loss_hint_ES: ', loss_hint_ES, 'loss_hint_MS: ', loss_hint_MS, 'loss_hint_LS: ', loss_hint_LS)
+                loss += loss_hint_ES + loss_hint_MS + loss_hint_LS
+                loss += loss_kd
+                                
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -434,14 +458,16 @@ def train(hyp, opt, device, tb_writer=None):
         # DDP process 0 or single-GPU
         if rank in [-1, 0]:
             # mAP
-            ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights'])
+            if ema:
+                ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
                 results, maps, times = test.test(data_dict,
                                                  batch_size=batch_size * 2,
                                                  imgsz=imgsz_test,
-                                                 model=ema.ema,
+                                                #  model=ema.ema,
+                                                model=model,
                                                  single_cls=opt.single_cls,
                                                  dataloader=testloader,
                                                  save_dir=save_dir,
@@ -481,8 +507,8 @@ def train(hyp, opt, device, tb_writer=None):
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
                         'model': deepcopy(model.module if is_parallel(model) else model),#.half(),
-                        'ema': deepcopy(ema.ema),#.half(),
-                        'updates': ema.updates,
+                        # 'ema': deepcopy(ema.ema),#.half(),
+                        # 'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None}
 
