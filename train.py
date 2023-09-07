@@ -411,7 +411,7 @@ def train(hyp, opt, device, tb_writer=None):
                 # s = ('%10s' * 2 + '%10.4g' * 6) % (
                 #     '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 s = ('%10s' * 2 + '%10.4g' * 8) % (
-                        '%g/%g' % (epoch, epochs - 1), mem, *mloss, loss_kd.item(), loss.item(), targets.shape[0], imgs.shape[-1])
+                        '%g/%g' % (epoch, epochs - 1), mem, *mloss, loss_kd.item(), loss.item(), targets.shape[0], imgs.shape[-1], loss.item())
 
                 pbar.set_description(s)
 
