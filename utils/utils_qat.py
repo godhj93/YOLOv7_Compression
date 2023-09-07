@@ -36,7 +36,7 @@ def collect_stats(model, data_loader, num_batches):
     model = model.cuda()
     for i, (image, _, _, _) in tqdm(enumerate(data_loader), total=num_batches):
         image = image.to('cuda', non_blocking=True).float()/ 255.0  # uint8 to float32, 0-255 to 0.0-1.0
-        print("CAUTION: This normalization can be severe problem for some models. Please check the normalization method.")
+        print("CAUTION: This normalization can cause a severe problem for some models. Please check the normalization method.")
         model(image.cuda())
         if i >= num_batches:
             break

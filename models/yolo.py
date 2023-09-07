@@ -118,6 +118,7 @@ class IDetect(nn.Module):
         self.im = nn.ModuleList(ImplicitM(self.no * self.na) for _ in ch)
 
     def forward(self, x):
+        # print(f"IDetect.forward, {self.training}")
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
@@ -139,6 +140,7 @@ class IDetect(nn.Module):
         return x if self.training else (torch.cat(z, 1), x)
     
     def fuseforward(self, x):
+        # print("IDetect.fuseforward")
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
@@ -168,7 +170,8 @@ class IDetect(nn.Module):
                 # print(y.view(bs, -1, self.no).shape)
                 z.append(y.view(bs, -1, self.no))
             else:
-                print("fuseforward training")
+                pass
+                # print("fuseforward else ")
                 # z.append(x[i].view(bs, -1, self.no))
 
         if self.training:
@@ -409,7 +412,7 @@ class IAuxDetect(nn.Module):
         return out
     
     def fuse(self):
-        print("IAuxDetect.fuse")
+        # print("IAuxDetect.fuse")
         # fuse ImplicitA and Convolution
         for i in range(len(self.m)):
             c1,c2,_,_ = self.m[i].weight.shape

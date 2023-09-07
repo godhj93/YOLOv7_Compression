@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 from threading import Thread
-import torch_tensorrt
+#import torch_tensorrt
 import numpy as np
 import torch
 import yaml
@@ -240,11 +240,14 @@ def test(data,
                     out = torch.Tensor(out).to(device)
                 
                 elif opt.engine == 'torch':
+                    model.model[-1].training=True
+                    B,C,H,W = img.shape
                     t = time_synchronized()
-                    out, train_out = model(img, augment=augment)  # inference and training outputs
-                    # train_out = model(img, augment=augment)  # inference and training outputs
+                    train_out = model(img, augment=augment)  # inference and training outputs
                     t0 += time_synchronized() - t                    
-                    # out, train_out = custom_inference.run(train_out, bs=1, no=15, ny_list=[48,24,12], nx_list=[84,42,21])
+
+                    # train_out = model(img, augment=augment)  # inference and training outputs
+                    out, train_out = custom_inference.run(train_out, bs=B, no=15, ny_list=[H//8,H//16,H//32], nx_list=[W//8,W//16,W//32])
                     
                 elif opt.engine == 'fpga':
                     B,C,H,W = img.shape

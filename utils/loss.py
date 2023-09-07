@@ -470,14 +470,16 @@ class ComputeLoss:
 
                 # Objectness
                 tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
-
+                
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
                     t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
                     t[range(n), tcls[i]] = self.cp
                     #t[t==self.cp] = iou.detach().clamp(0).type(t.dtype)
                     lcls += self.BCEcls(ps[:, 5:], t)  # BCE
-
+                    self.hj_debug_y_hat = ps[:,5:]
+                    self.hj_debug_true = t
+                    print(f"Output class p :{ps[:, :5]}, True: {t}")
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
@@ -552,6 +554,96 @@ class ComputeLoss:
 
         return tcls, tbox, indices, anch
 
+class ComputeLoss_HLM(ComputeLoss):
+    """
+    Homogenused Logit-Mathing for Knowledg Distillation
+    Saha et al., "Unified Framework for Effective Knowledge Distillation in Single Stage Object Detectors," DICTA, 2022.
+    Date: 2023.09.07
+    """
+    def __init__(self, teacher, student):        
+        # Define L2 norm
+        self.L2 = nn.MSELoss()
+        
+        self.teacher = teacher
+        self.student = student
+
+    def __call__(self, y_t, y_s):
+        
+        # Ensure both outputs are tuples and have the same length
+        assert isinstance(y_t, tuple) and isinstance(y_s, tuple), "Expected outputs to be tuples"
+        # assert len(y_t) == len(y_s), "Mismatch in tuple lengths"
+        loss = 0
+        # Compute L2 loss for each header's output
+        loss += self.L2(y_s[0], y_t[1][0])
+        loss += self.L2(y_s[1], y_t[1][1])
+        loss += self.L2(y_s[2], y_t[1][2])
+        
+        # If you want the average loss across scales, you can divide by the number of scales
+        # loss = loss / len(y_t)
+        return loss
+        
+        
+class ComputeLoss_CE(ComputeLoss):
+    '''
+    Modified loss_cls from BCE to CE.
+    Author: H.J. Shin
+    Date: 2023.09.05
+    '''
+    def __init__(self, model):
+        super().__init__(model)
+        
+        self.CE = nn.CrossEntropyLoss()
+        
+    def __call__(self, p, targets):  # predictions, targets, model
+        device = targets.device
+        lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+        tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+
+        # Losses
+        for i, pi in enumerate(p):  # layer index, layer predictions
+            b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+            tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
+
+            n = b.shape[0]  # number of targets
+            if n:
+                ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
+
+                # Regression
+                pxy = ps[:, :2].sigmoid() * 2. - 0.5
+                pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+                pbox = torch.cat((pxy, pwh), 1)  # predicted box
+                iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
+                lbox += (1.0 - iou).mean()  # iou loss
+
+                # Objectness
+                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
+                
+                # Classification
+                if self.nc > 1:  # cls loss (only if multiple classes)
+                    t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
+                    t[range(n), tcls[i]] = self.cp
+                    #t[t==self.cp] = iou.detach().clamp(0).type(t.dtype)
+#                     lcls += self.BCEcls(ps[:, 5:], t)  # BCE
+                    lcls += self.CE(ps[:,5:], t) # CE
+                # Append targets to text file
+                # with open('targets.txt', 'a') as file:
+                #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
+
+            obji = self.BCEobj(pi[..., 4], tobj)
+            lobj += obji * self.balance[i]  # obj loss
+            if self.autobalance:
+                self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
+
+        if self.autobalance:
+            self.balance = [x / self.balance[self.ssi] for x in self.balance]
+        lbox *= self.hyp['box']
+        lobj *= self.hyp['obj']
+        lcls *= self.hyp['cls']
+        bs = tobj.shape[0]  # batch size
+
+        loss = lbox + lobj + lcls
+        return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
+    
 
 class ComputeLossOTA:
     # Compute losses
