@@ -197,7 +197,13 @@ def train(hyp, opt, device, tb_writer=None):
                 pg0.append(v.rbr_dense.weight_rbr_gconv_pw)
             if hasattr(v.rbr_dense, 'vector'):   
                 pg0.append(v.rbr_dense.vector)
-
+        # add hint regressor parameters
+        for reg in [regressor_ES, regressor_MS, regressor_LS]:
+            for k, v in reg.named_parameters():
+                if hasattr(v, 'bias'):
+                    pg2.append(v)  # biases
+                else:
+                    pg1.append(v)  # weights
     if opt.adam:
         optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
     else:

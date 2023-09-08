@@ -579,7 +579,7 @@ class ComputeLoss_HLM(ComputeLoss):
         loss += self.L2(y_s[2][:,:,:,:,4:], y_t[1][2][:,:,:,:,4:])
         
         # If you want the average loss across scales, you can divide by the number of scales
-        # loss = loss / len(y_t)
+        loss = loss / 3.0
         return loss
         
         
