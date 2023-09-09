@@ -93,9 +93,10 @@ def train(hyp, opt, device, tb_writer=None):
     teacher.cuda().eval()
     
     from models.yolo import HintRegressor
-    regressor_ES = HintRegressor(in_channels=256).cuda()
-    regressor_MS = HintRegressor(in_channels=512).cuda()
-    regressor_LS = HintRegressor(in_channels=1024).cuda()
+    regressor_FS = HintRegressor(in_channels=128, reduceChannel=2).cuda()
+    regressor_ES = HintRegressor(in_channels=256, reduceChannel=4).cuda()
+    regressor_MS = HintRegressor(in_channels=512, reduceChannel=4).cuda()
+    regressor_LS = HintRegressor(in_channels=1024, reduceChannel=4).cuda()
     
     # Model
     pretrained = weights.endswith('.pt')
@@ -198,7 +199,7 @@ def train(hyp, opt, device, tb_writer=None):
             if hasattr(v.rbr_dense, 'vector'):   
                 pg0.append(v.rbr_dense.vector)
         # add hint regressor parameters
-        for reg in [regressor_ES, regressor_MS, regressor_LS]:
+        for reg in [regressor_FS, regressor_ES, regressor_MS, regressor_LS]:
             for k, v in reg.named_parameters():
                 if hasattr(v, 'bias'):
                     pg2.append(v)  # biases
@@ -403,16 +404,17 @@ def train(hyp, opt, device, tb_writer=None):
                 
                 # KD Loss    
                 with torch.no_grad():
-                    y_t = teacher(imgs)
+                   teacher(imgs, isteacher=True)
 
-                loss_kd = compute_hlm_loss(y_t, pred)
+                #loss_kd = compute_hlm_loss(y_t, pred)
                 
-                loss_hint_ES = compute_hint_loss(regressor_ES(teacher.hint_features[0]), model.hint_features[0])
-                loss_hint_MS = compute_hint_loss(regressor_MS(teacher.hint_features[1]), model.hint_features[1])
-                loss_hint_LS = compute_hint_loss(regressor_LS(teacher.hint_features[2]), model.hint_features[2])
+                loss_hint_FS = compute_hint_loss(regressor_FS(teacher.hint_features[0]), model.hint_features[0])
+                loss_hint_ES = compute_hint_loss(regressor_ES(teacher.hint_features[1]), model.hint_features[1])
+                loss_hint_MS = compute_hint_loss(regressor_MS(teacher.hint_features[2]), model.hint_features[2])
+                loss_hint_LS = compute_hint_loss(regressor_LS(teacher.hint_features[3]), model.hint_features[3])
                 # print('loss_hint_ES: ', loss_hint_ES, 'loss_hint_MS: ', loss_hint_MS, 'loss_hint_LS: ', loss_hint_LS)
-                loss += loss_hint_ES + loss_hint_MS + loss_hint_LS
-                loss += loss_kd
+                loss += loss_hint_FS + loss_hint_ES + loss_hint_MS + loss_hint_LS
+                #loss += loss_kd
                                 
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode

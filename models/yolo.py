@@ -847,7 +847,7 @@ class Model_KD(Model):
     def __init__(self, cfg, ch, nc, anchors):
         super().__init__(cfg, ch, nc, anchors)
 
-    def forward(self, x, augment=False, profile=False):
+    def forward(self, x, augment=False, profile=False, isteacher=False):
         if augment:
             img_size = x.shape[-2:]  # height, width
             s = [1, 0.83, 0.67]  # scales
@@ -865,13 +865,14 @@ class Model_KD(Model):
                 y.append(yi)
             return torch.cat(y, 1), None  # augmented inference, train
         else:
-            return self.forward_kd(x)  # single-scale inference, train
+            return self.forward_kd(x, isteacher)  # single-scale inference, train
         
-    def forward_kd(self, x):
+    def forward_kd(self, x, isteacher):
         y, dt = [], []  # outputs
         
         self.hint_features = []
-        last_mp_in_backbone_idx = 0
+        # last_mp_in_backbone_idx = 0
+        last_Concat_in_backbone_idx = 0
         for idx, m in enumerate(self.model):
             
             if m.f != -1:  # if not from previous layer
@@ -886,10 +887,18 @@ class Model_KD(Model):
            
             x = m(x)  # run
             
-            if isinstance(m, MP):
-                last_mp_in_backbone_idx += 1
-                if last_mp_in_backbone_idx <= 3:
-                    # print(f"layer {idx} is a MaxPooling layer in backbone")
+            # if isinstance(m, MP):
+            #     last_mp_in_backbone_idx += 1
+            #     if last_mp_in_backbone_idx <= 3:
+            #         print(f"layer {idx} is a MaxPooling layer in backbone")
+            #         self.hint_features.append(x)
+            if isteacher:
+                if idx in [3,16,29,42]:
+                    # print(f"layer {idx} is a {m} layer in teacher backbone")
+                    self.hint_features.append(x)
+            else:
+                if idx in [1, 8 ,15, 22]:
+                    # print(f"layer {idx} is a {m} layer in student backbone")
                     self.hint_features.append(x)
             y.append(x if m.i in self.save else None)  # save output
 
