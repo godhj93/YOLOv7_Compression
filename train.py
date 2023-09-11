@@ -90,13 +90,13 @@ def train(hyp, opt, device, tb_writer=None):
     state_dict = intersect_dicts(state_dict, teacher.state_dict(), exclude=exclude)  # intersect
     teacher.load_state_dict(state_dict, strict=False)  # load
     # teacher = attempt_load(teacher_weight, map_location=device)  # load teacher
-    teacher.cuda().eval()
+    teacher.cuda().train()
     
     from models.yolo import HintRegressor
-    regressor_FS = HintRegressor(in_channels=128, reduceChannel=2).cuda()
-    regressor_ES = HintRegressor(in_channels=256, reduceChannel=4).cuda()
-    regressor_MS = HintRegressor(in_channels=512, reduceChannel=4).cuda()
-    regressor_LS = HintRegressor(in_channels=1024, reduceChannel=4).cuda()
+    regressor_1 = HintRegressor(in_channels=64, reduceChannel=2).cuda()
+    regressor_2 = HintRegressor(in_channels=256, reduceChannel=2).cuda()
+    regressor_3 = HintRegressor(in_channels=512, reduceChannel=2).cuda()
+    regressor_4 = HintRegressor(in_channels=1024, reduceChannel=2).cuda()
     
     # Model
     pretrained = weights.endswith('.pt')
@@ -199,7 +199,7 @@ def train(hyp, opt, device, tb_writer=None):
             if hasattr(v.rbr_dense, 'vector'):   
                 pg0.append(v.rbr_dense.vector)
         # add hint regressor parameters
-        for reg in [regressor_FS, regressor_ES, regressor_MS, regressor_LS]:
+        for reg in [regressor_1, regressor_2, regressor_3, regressor_4]:
             for k, v in reg.named_parameters():
                 if hasattr(v, 'bias'):
                     pg2.append(v)  # biases
@@ -404,18 +404,23 @@ def train(hyp, opt, device, tb_writer=None):
                 
                 # KD Loss    
                 with torch.no_grad():
-                   teacher(imgs, isteacher=True)
+                  y_t =  teacher(imgs, isteacher=True)
 
-                #loss_kd = compute_hlm_loss(y_t, pred)
                 
-                loss_hint_FS = compute_hint_loss(regressor_FS(teacher.hint_features[0]), model.hint_features[0])
-                loss_hint_ES = compute_hint_loss(regressor_ES(teacher.hint_features[1]), model.hint_features[1])
-                loss_hint_MS = compute_hint_loss(regressor_MS(teacher.hint_features[2]), model.hint_features[2])
-                loss_hint_LS = compute_hint_loss(regressor_LS(teacher.hint_features[3]), model.hint_features[3])
-                # print('loss_hint_ES: ', loss_hint_ES, 'loss_hint_MS: ', loss_hint_MS, 'loss_hint_LS: ', loss_hint_LS)
-                loss += loss_hint_FS + loss_hint_ES + loss_hint_MS + loss_hint_LS
-                #loss += loss_kd
-                                
+                # if epoch <= 10:
+                #     loss = 0 
+                #     loss += compute_hint_loss(regressor_1(teacher.hint_features[0]), model.hint_features[0])
+                #     loss += compute_hint_loss(regressor_2(teacher.hint_features[1]), model.hint_features[1])
+                #     loss += compute_hint_loss(regressor_3(teacher.hint_features[2]), model.hint_features[2])
+                #     loss += compute_hint_loss(regressor_4(teacher.hint_features[3]), model.hint_features[3])
+
+                #     loss += compute_hint_loss(teacher.hint_features[4][0], model.hint_features[4][0])
+                #     loss += compute_hint_loss(teacher.hint_features[4][1], model.hint_features[4][1])
+                #     loss += compute_hint_loss(teacher.hint_features[4][2], model.hint_features[4][2])
+                
+                loss_kd = compute_hlm_loss(y_t, pred)
+                alpha = 1.0
+                loss += alpha * loss_kd
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
