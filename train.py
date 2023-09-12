@@ -93,10 +93,10 @@ def train(hyp, opt, device, tb_writer=None):
     teacher.cuda().train()
     
     from models.yolo import HintRegressor
-    regressor_1 = HintRegressor(in_channels=64, reduceChannel=2).cuda()
-    regressor_2 = HintRegressor(in_channels=256, reduceChannel=2).cuda()
-    regressor_3 = HintRegressor(in_channels=512, reduceChannel=2).cuda()
-    regressor_4 = HintRegressor(in_channels=1024, reduceChannel=2).cuda()
+    reg1 = HintRegressor(64, 2).cuda().train()
+    reg2 = HintRegressor(64, 4).cuda().train()
+    reg3 = HintRegressor(128, 4).cuda().train()
+    reg4 = HintRegressor(256, 4).cuda().train()
     
     # Model
     pretrained = weights.endswith('.pt')
@@ -199,12 +199,12 @@ def train(hyp, opt, device, tb_writer=None):
             if hasattr(v.rbr_dense, 'vector'):   
                 pg0.append(v.rbr_dense.vector)
         # add hint regressor parameters
-        for reg in [regressor_1, regressor_2, regressor_3, regressor_4]:
-            for k, v in reg.named_parameters():
-                if hasattr(v, 'bias'):
-                    pg2.append(v)  # biases
-                else:
-                    pg1.append(v)  # weights
+        # for reg in [regressor_1, regressor_2, regressor_3, regressor_4]:
+        #     for k, v in reg.named_parameters():
+        #         if hasattr(v, 'bias'):
+        #             pg2.append(v)  # biases
+        #         else:
+        #             pg1.append(v)  # weights
     if opt.adam:
         optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
     else:
@@ -333,7 +333,7 @@ def train(hyp, opt, device, tb_writer=None):
         compute_loss = ComputeLoss(model)  # init loss class
     
     # Teacher: YOLOv7, Student: model -> YOLOv7-tiny
-    compute_hlm_loss = ComputeLoss_HLM(teacher, model)
+    # compute_hlm_loss = ComputeLoss_HLM(teacher, model)
     compute_hint_loss = nn.MSELoss()
     
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
@@ -404,23 +404,14 @@ def train(hyp, opt, device, tb_writer=None):
                 
                 # KD Loss    
                 with torch.no_grad():
-                  y_t =  teacher(imgs, isteacher=True)
+                    y_t =  teacher(imgs, isteacher=True)
 
-                
-                # if epoch <= 10:
-                #     loss = 0 
-                #     loss += compute_hint_loss(regressor_1(teacher.hint_features[0]), model.hint_features[0])
-                #     loss += compute_hint_loss(regressor_2(teacher.hint_features[1]), model.hint_features[1])
-                #     loss += compute_hint_loss(regressor_3(teacher.hint_features[2]), model.hint_features[2])
-                #     loss += compute_hint_loss(regressor_4(teacher.hint_features[3]), model.hint_features[3])
+                hint_loss = 0
+                hint_loss += compute_hint_loss(reg1(model.hint_features[0]), teacher.hint_features[0])
+                hint_loss += compute_hint_loss(reg2(model.hint_features[1]), teacher.hint_features[1])
+                hint_loss += compute_hint_loss(reg3(model.hint_features[2]), teacher.hint_features[2])
+                hint_loss += compute_hint_loss(reg4(model.hint_features[3]), teacher.hint_features[3])
 
-                #     loss += compute_hint_loss(teacher.hint_features[4][0], model.hint_features[4][0])
-                #     loss += compute_hint_loss(teacher.hint_features[4][1], model.hint_features[4][1])
-                #     loss += compute_hint_loss(teacher.hint_features[4][2], model.hint_features[4][2])
-                
-                loss_kd = compute_hlm_loss(y_t, pred)
-                alpha = 1.0
-                loss += alpha * loss_kd
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -498,7 +489,9 @@ def train(hyp, opt, device, tb_writer=None):
                 os.system('gsutil cp %s gs://%s/results/results%s.txt' % (results_file, opt.bucket, opt.name))
 
             # Log
-            tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
+            if tb_writer:
+                tb_writer.add_scalar('train/hint_loss', hint_loss, epoch)
+            tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss, ',  # train loss
                     'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
                     'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
                     'x/lr0', 'x/lr1', 'x/lr2']  # params

@@ -846,7 +846,12 @@ class Model_KD(Model):
     
     def __init__(self, cfg, ch, nc, anchors):
         super().__init__(cfg, ch, nc, anchors)
-
+        
+#         self.regressor_1 = HintRegressor(in_channels=64, multiple=2).cuda()
+#         self.regressor_2 = HintRegressor(in_channels=64, multiple=4).cuda()
+#         self.regressor_3 = HintRegressor(in_channels=128, multiple=4).cuda()
+#         self.regressor_4 = HintRegressor(in_channels=256, multiple=4).cuda()
+        
     def forward(self, x, augment=False, profile=False, isteacher=False):
         if augment:
             img_size = x.shape[-2:]  # height, width
@@ -871,7 +876,6 @@ class Model_KD(Model):
         y, dt = [], []  # outputs
         
         self.hint_features = []
-        # last_mp_in_backbone_idx = 0
         last_Concat_in_backbone_idx = 0
         for idx, m in enumerate(self.model):
             
@@ -887,29 +891,27 @@ class Model_KD(Model):
            
             x = m(x)  # run
             
-            # if isinstance(m, MP):
-            #     last_mp_in_backbone_idx += 1
-            #     if last_mp_in_backbone_idx <= 3:
-            #         print(f"layer {idx} is a MaxPooling layer in backbone")
-            #         self.hint_features.append(x)
             if isteacher:
                 if idx in [3,16,29,42]:
-                    # print(f"layer {idx} is a {m} layer in teacher backbone")
+                    # print(f"layer {idx} is a {m} layer in teacher backbone: shape:")
                     self.hint_features.append(x)
-            else:
-                if idx in [1, 8 ,15, 22]:
-                    # print(f"layer {idx} is a {m} layer in student backbone")
-                    self.hint_features.append(x)
-            y.append(x if m.i in self.save else None)  # save output
 
+            else:
+                if idx in [1,8,15,22]:
+                    # print(f"layer {idx} is a {m} layer in student backbone: shape:")
+                    self.hint_features.append(x)
+        
+        
+        
+        
+            y.append(x if m.i in self.save else None)  # save output
+            
         if len(x) == 3:
-            # print(f"len 3")
             return (x[0], x[1], x[2]) 
 
         elif len(x) == 2:
-            # print(f"len 2")
             return x[0], x[1]
-        #return x
+        
         
 
 if __name__ == '__main__':

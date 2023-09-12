@@ -286,20 +286,38 @@ def attempt_load(weights,  map_location=None):
         for k in ['names', 'stride']:
             setattr(model, k, getattr(model[-1], k))
         return model  # return ensemble
-
+    
+    
 class HintRegressor(nn.Module):
     '''
     Author: H.J. Shin
     Date: 23.09.07
     Description: Hint regressor for knowledge distillation.
     '''
-    def __init__(self, in_channels, reduceChannel):
+    def __init__(self, in_channels, multiple):
         super(HintRegressor, self).__init__()
-        self.pconv1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels//reduceChannel, kernel_size=1, stride=1, padding=0)
+        self.pconv1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels*multiple, kernel_size=1, stride=1, padding=0)
         
     def forward(self, x):
         '''
         x is a feature map from a teacher network whose channel size is 4 times larger than the student.
         '''
         return self.pconv1(x)
+        
+
+# class HintRegressor(nn.Module):
+#     '''
+#     Author: H.J. Shin
+#     Date: 23.09.07
+#     Description: Hint regressor for knowledge distillation.
+#     '''
+#     def __init__(self, in_channels, reduceChannel):
+#         super(HintRegressor, self).__init__()
+#         self.pconv1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels//reduceChannel, kernel_size=1, stride=1, padding=0)
+        
+#     def forward(self, x):
+#         '''
+#         x is a feature map from a teacher network whose channel size is 4 times larger than the student.
+#         '''
+#         return self.pconv1(x)
         

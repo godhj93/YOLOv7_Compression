@@ -560,12 +560,9 @@ class ComputeLoss_HLM(ComputeLoss):
     Saha et al., "Unified Framework for Effective Knowledge Distillation in Single Stage Object Detectors," DICTA, 2022.
     Date: 2023.09.07
     """
-    def __init__(self, teacher, student):        
+    def __init__(self):        
         # Define L2 norm
         self.L2 = nn.MSELoss()
-        
-        self.teacher = teacher
-        self.student = student
 
     def __call__(self, y_t, y_s):
         
@@ -575,9 +572,9 @@ class ComputeLoss_HLM(ComputeLoss):
         loss = 0
         # Compute L2 loss for each header's output except bbox coordinates
         # print(y_s[0].shape, y_t[1][0].shape)
-        loss += self.L2(y_s[0][:,:,:,:,4:], y_t[0][:,:,:,:,4:])
-        loss += self.L2(y_s[1][:,:,:,:,4:], y_t[1][:,:,:,:,4:])
-        loss += self.L2(y_s[2][:,:,:,:,4:], y_t[2][:,:,:,:,4:])
+        loss += self.L2(y_s[0][:,:,:,:,5:], y_t[0][:,:,:,:,5:])
+        loss += self.L2(y_s[1][:,:,:,:,5:], y_t[1][:,:,:,:,5:])
+        loss += self.L2(y_s[2][:,:,:,:,5:], y_t[2][:,:,:,:,5:])
         
         # If you want the average loss across scales, you can divide by the number of scales
         # loss = loss / 3.0
