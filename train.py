@@ -98,6 +98,9 @@ def train(hyp, opt, device, tb_writer=None):
     reg3 = HintRegressor(128, 4).cuda().train()
     reg4 = HintRegressor(256, 4).cuda().train()
     
+    from itertools import chain
+    opt_adaptive_layer = optim.Adam(params=chain(reg1.parameters(), reg2.parameters(), reg3.parameters(), reg4.parameters()), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+
     # Model
     pretrained = weights.endswith('.pt')
     if pretrained:
@@ -334,7 +337,7 @@ def train(hyp, opt, device, tb_writer=None):
     
     # Teacher: YOLOv7, Student: model -> YOLOv7-tiny
     # compute_hlm_loss = ComputeLoss_HLM(teacher, model)
-    compute_hint_loss = nn.MSELoss()
+    compute_hint_loss = nn.MSELoss(reduction='mean')
     
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
@@ -406,12 +409,18 @@ def train(hyp, opt, device, tb_writer=None):
                 with torch.no_grad():
                     y_t =  teacher(imgs, isteacher=True)
 
+                
                 hint_loss = 0
                 hint_loss += compute_hint_loss(reg1(model.hint_features[0]), teacher.hint_features[0])
                 hint_loss += compute_hint_loss(reg2(model.hint_features[1]), teacher.hint_features[1])
                 hint_loss += compute_hint_loss(reg3(model.hint_features[2]), teacher.hint_features[2])
                 hint_loss += compute_hint_loss(reg4(model.hint_features[3]), teacher.hint_features[3])
                 loss += hint_loss
+                
+                opt_adaptive_layer.zero_grad()
+                hint_loss.backward(retain_graph=True)
+                opt_adaptive_layer.step()  
+                
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
