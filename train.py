@@ -411,7 +411,7 @@ def train(hyp, opt, device, tb_writer=None):
                 hint_loss += compute_hint_loss(reg2(model.hint_features[1]), teacher.hint_features[1])
                 hint_loss += compute_hint_loss(reg3(model.hint_features[2]), teacher.hint_features[2])
                 hint_loss += compute_hint_loss(reg4(model.hint_features[3]), teacher.hint_features[3])
-
+                loss += hint_loss
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
