@@ -336,7 +336,7 @@ def train(hyp, opt, device, tb_writer=None):
         compute_loss = ComputeLoss(model)  # init loss class
     
     # Teacher: YOLOv7, Student: model -> YOLOv7-tiny
-    # compute_hlm_loss = ComputeLoss_HLM(teacher, model)
+    compute_hlm_loss = ComputeLoss_HLM()
     compute_hint_loss = nn.MSELoss(reduction='mean')
     
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
@@ -415,7 +415,13 @@ def train(hyp, opt, device, tb_writer=None):
                 hint_loss += compute_hint_loss(reg2(model.hint_features[1]), teacher.hint_features[1])
                 hint_loss += compute_hint_loss(reg3(model.hint_features[2]), teacher.hint_features[2])
                 hint_loss += compute_hint_loss(reg4(model.hint_features[3]), teacher.hint_features[3])
-                loss += hint_loss
+                
+                
+                hlm_loss = compute_hlm_loss(y_t, pred)
+                alpha = 0.0
+                beta = 1.0
+                
+                loss += alpha * hint_loss + beta * hlm_loss
                 
                 opt_adaptive_layer.zero_grad()
                 hint_loss.backward(retain_graph=True)
@@ -500,6 +506,7 @@ def train(hyp, opt, device, tb_writer=None):
             # Log
             if tb_writer:
                 tb_writer.add_scalar('train/hint_loss', hint_loss, epoch)
+                tb_writer.add_scalar('train/hlm_loss', hlm_loss, epoch)
             tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss, ',  # train loss
                     'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
                     'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
