@@ -554,33 +554,34 @@ class ComputeLoss:
 
         return tcls, tbox, indices, anch
 
-class ComputeLoss_HLM(ComputeLoss):
+import torch.nn.functional as F
+class ComputeLoss_KD_Reponse(ComputeLoss):
     """
-    Homogenused Logit-Mathing for Knowledg Distillation
-    Saha et al., "Unified Framework for Effective Knowledge Distillation in Single Stage Object Detectors," DICTA, 2022.
+    Hinton et. al., "Distilling the Knowledge in a Neural Network", NIPS
     Date: 2023.09.07
     """
-    def __init__(self):        
+    def __init__(self, T=1.0):        
         # Define L2 norm
         self.L2 = nn.MSELoss()
+        self.T = T
 
     def __call__(self, y_t, y_s):
         
         # Ensure both outputs are tuples and have the same length
         assert isinstance(y_t, tuple) and isinstance(y_s, tuple), "Expected outputs to be tuples"
-        # assert len(y_t) == len(y_s), "Mismatch in tuple lengths"
         loss = 0
-        # Compute L2 loss for each header's output except bbox coordinates
-        # print(y_s[0].shape, y_t[1][0].shape)
-        loss += self.L2(y_s[0][:,:,:,:,5:], y_t[0][:,:,:,:,5:])
-        loss += self.L2(y_s[1][:,:,:,:,5:], y_t[1][:,:,:,:,5:])
-        loss += self.L2(y_s[2][:,:,:,:,5:], y_t[2][:,:,:,:,5:])
         
-        # If you want the average loss across scales, you can divide by the number of scales
-        # loss = loss / 3.0
-        return loss
+        for i in range(3):
+            # Apply softmax with temperature to the obj class probability distribution
+            y_s_prob = F.softmax(y_s[i][:, :, :, :, 5:] / self.T, dim=-1)
+            y_t_prob = F.softmax(y_t[i][:, :, :, :, 5:] / self.T, dim=-1)
+            
+            # Compute distillation loss using softened probabilities
+            loss += self.L2(y_s_prob, y_t_prob)
         
-        
+        return loss / 3.0
+
+
 class ComputeLoss_CE(ComputeLoss):
     '''
     Modified loss_cls from BCE to CE.

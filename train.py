@@ -30,7 +30,7 @@ from utils.general import labels_to_class_weights, increment_path, labels_to_ima
     fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_git_status, check_img_size, \
     check_requirements, print_mutation, set_logging, one_cycle, colorstr
 from utils.google_utils import attempt_download
-from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLoss_CE, ComputeLoss_HLM
+from utils.loss import ComputeLoss, ComputeLossOTA, ComputeLoss_CE, ComputeLoss_KD_Reponse
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
@@ -336,7 +336,7 @@ def train(hyp, opt, device, tb_writer=None):
         compute_loss = ComputeLoss(model)  # init loss class
     
     # Teacher: YOLOv7, Student: model -> YOLOv7-tiny
-    compute_hlm_loss = ComputeLoss_HLM()
+    compute_hinton_loss = ComputeLoss_KD_Reponse(T=1.0)
     compute_hint_loss = nn.MSELoss(reduction='mean')
     
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
@@ -417,7 +417,7 @@ def train(hyp, opt, device, tb_writer=None):
                 hint_loss += compute_hint_loss(reg4(model.hint_features[3]), teacher.hint_features[3])
                 
                 
-                hlm_loss = compute_hlm_loss(y_t, pred)
+                hlm_loss = compute_hinton_loss(y_t, pred)
                 alpha = 0.0
                 beta = 1.0
                 
