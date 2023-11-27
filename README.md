@@ -3,7 +3,7 @@
 ## Installation
 ### Clone this repository
 ```
-$ https://github.com/godhj93/YOLOv7_Compression.git
+$ https://github.com/godhj93/YOLOv7_VisDrone.git
 ```
 
 ### Prepare VisDrone dataset
